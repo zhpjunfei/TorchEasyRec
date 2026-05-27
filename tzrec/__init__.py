@@ -71,7 +71,8 @@ _use_deterministic_algorithms = _os.getenv("USE_DETERMINISTIC_ALGORITHMS", "0") 
 if _use_deterministic_algorithms:
     _torch.use_deterministic_algorithms(True)
 
-_load_class.auto_import()
+if not _os.environ.get("TZREC_SKIP_AUTO_IMPORT"):
+    _load_class.auto_import()
 
 from tzrec.utils.filesystem_util import (  # NOQA
     register_external_filesystem as _register_external_filesystem,  # NOQA

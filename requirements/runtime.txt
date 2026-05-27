@@ -21,4 +21,4 @@ scikit-learn
 tensorboard
 torch==2.11.0
 torchmetrics==1.0.3
-torchrec==1.6.0
+torchrec==1.5.0

@@ -21,7 +21,13 @@ from torchrec.distributed.planner import (
     planners,
     shard_estimators,
 )
-from torchrec.distributed.planner.estimator.types import HardwarePerfConfig
+try:
+    from torchrec.distributed.planner.estimator.types import HardwarePerfConfig
+
+    _has_hw_perf_config = True
+except ModuleNotFoundError:
+    HardwarePerfConfig = None  # type: ignore[assignment]
+    _has_hw_perf_config = False
 from torchrec.distributed.planner.types import (
     ParameterConstraints,
     ShardingOption,
@@ -382,36 +388,38 @@ if has_dynamicemb:
     # pyre-ignore [9]
     planners.to_sharding_plan = _to_sharding_plan
 
-    _orig_hw_perf_config_get_device_bw = HardwarePerfConfig.get_device_bw
+    if _has_hw_perf_config:
 
-    def _customized_kernel_aware_get_device_bw(
-        self,  # pyre-ignore [2]
-        compute_device: str,
-        compute_kernel: str,
-        hbm_mem_bw: float,
-        ddr_mem_bw: float,
-        ssd_mem_bw: float,
-        hbm_to_ddr_mem_bw: float,
-        caching_ratio: Optional[float] = None,
-        prefetch_pipeline: bool = False,
-    ) -> Optional[float]:
-        if compute_kernel == EmbeddingComputeKernel.CUSTOMIZED_KERNEL.value:
-            cr = caching_ratio if caching_ratio is not None else 0.0
-            return (cr * hbm_mem_bw + (1 - cr) * hbm_to_ddr_mem_bw) / 10
-        return _orig_hw_perf_config_get_device_bw(
-            self,
-            compute_device,
-            compute_kernel,
-            hbm_mem_bw,
-            ddr_mem_bw,
-            ssd_mem_bw,
-            hbm_to_ddr_mem_bw,
-            caching_ratio,
-            prefetch_pipeline,
-        )
+        _orig_hw_perf_config_get_device_bw = HardwarePerfConfig.get_device_bw
 
-    # pyre-ignore [9]
-    HardwarePerfConfig.get_device_bw = _customized_kernel_aware_get_device_bw
+        def _customized_kernel_aware_get_device_bw(
+            self,  # pyre-ignore [2]
+            compute_device: str,
+            compute_kernel: str,
+            hbm_mem_bw: float,
+            ddr_mem_bw: float,
+            ssd_mem_bw: float,
+            hbm_to_ddr_mem_bw: float,
+            caching_ratio: Optional[float] = None,
+            prefetch_pipeline: bool = False,
+        ) -> Optional[float]:
+            if compute_kernel == EmbeddingComputeKernel.CUSTOMIZED_KERNEL.value:
+                cr = caching_ratio if caching_ratio is not None else 0.0
+                return (cr * hbm_mem_bw + (1 - cr) * hbm_to_ddr_mem_bw) / 10
+            return _orig_hw_perf_config_get_device_bw(
+                self,
+                compute_device,
+                compute_kernel,
+                hbm_mem_bw,
+                ddr_mem_bw,
+                ssd_mem_bw,
+                hbm_to_ddr_mem_bw,
+                caching_ratio,
+                prefetch_pipeline,
+            )
+
+        # pyre-ignore [9]
+        HardwarePerfConfig.get_device_bw = _customized_kernel_aware_get_device_bw
 
     def _calculate_dynamicemb_storage_specific_sizes(
         tensor: torch.Tensor,

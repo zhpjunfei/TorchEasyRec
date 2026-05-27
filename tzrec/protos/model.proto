@@ -66,6 +66,7 @@ message ModelConfig {
         DlrmHSTU dlrm_hstu = 205;
         PEPNet pepnet = 206;
         UltraHSTU ultra_hstu = 207;
+        PEPNet_v2 pepnet_v2 = 208;
 
         DSSM dssm = 301;
         DSSMV2 dssm_v2 = 302;
