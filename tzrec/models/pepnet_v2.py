@@ -18,15 +18,47 @@ from tzrec.datasets.utils import Batch
 from tzrec.features.feature import BaseFeature
 from tzrec.models.multi_task_rank import MultiTaskRank
 from tzrec.modules.cdot import CDOT
+from tzrec.modules.interaction import CrossV2
 from tzrec.modules.lhuc_net import LHUC_EPNet, LHUC_PPNet
 from tzrec.protos.model_pb2 import ModelConfig
 from tzrec.utils.config_util import config_to_kwargs
+
+
+@torch.fx.wrap
+def _extract_bias_fn(
+    feature_tensors: List[torch.Tensor],
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    bias_vec_list = []
+    for ft in feature_tensors:
+        bias_vec_list.append(ft[:, 0:1])
+    bias_vec = torch.cat(bias_vec_list, dim=1)
+    bias_sum = bias_vec.sum(dim=1, keepdim=True)
+    return bias_vec, bias_sum
+
+
+@torch.fx.wrap
+def _extract_cdot_fn(
+    feature_tensors: List[torch.Tensor], cdot_input_dim: int
+) -> torch.Tensor:
+    slots = []
+    for ft in feature_tensors:
+        if ft.size(1) >= cdot_input_dim:
+            slots.append(ft[:, :cdot_input_dim])
+        else:
+            pad = torch.zeros(
+                ft.size(0),
+                cdot_input_dim - ft.size(1),
+                device=ft.device,
+            )
+            slots.append(torch.cat([ft, pad], dim=1))
+    return torch.stack(slots, dim=1)
 
 
 class PEPNet_v2(MultiTaskRank):
     """PEPNet_v2: Enhanced PEPNet with CDOT, Bias, LHUC-EPNet, LHUC-PPNet.
 
     Architecture improvements over PEPNet:
+    - DCNv2 Cross Network: explicit feature crossing via CrossV2 on main features
     - CDOT: dynamic feature crossing via compressed transformation
     - Bias: per-feature 1-dim bias via first embedding element
     - Per-component LayerNorm before concatenation (matching TF)
@@ -61,7 +93,9 @@ class PEPNet_v2(MultiTaskRank):
         self._main_feature_dim_list = list(self._main_feature_dims.values())
 
         if self.embedding_group.has_group(self._cdot_group_name):
-            cdot_cfg = self._model_config.cdot if self._model_config.HasField("cdot") else None
+            cdot_cfg = (
+                self._model_config.cdot if self._model_config.HasField("cdot") else None
+            )
             cdot_input_dim = cdot_cfg.input_dim if cdot_cfg else 16
             cdot_output_dim = cdot_cfg.output_dim if cdot_cfg else 4
             cdot_mid_dim = cdot_cfg.mid_dim if cdot_cfg else 32
@@ -87,6 +121,16 @@ class PEPNet_v2(MultiTaskRank):
             self._cdot_input_dim = 0
             self._cdot_output_dim = 0
 
+        if self._model_config.HasField("dcnv2"):
+            dcnv2_cfg = self._model_config.dcnv2
+            self.cross_net = CrossV2(
+                input_dim=self._main_group_dim,
+                cross_num=dcnv2_cfg.cross_num,
+                low_rank=dcnv2_cfg.low_rank,
+            )
+        else:
+            self.cross_net = None
+
         if self.embedding_group.has_group(self._bias_group_name):
             self._bias_feature_dims = self.embedding_group.group_feature_dims(
                 self._bias_group_name
@@ -96,14 +140,20 @@ class PEPNet_v2(MultiTaskRank):
             self._bias_feature_dims = {}
             self._num_bias_features = 0
 
+        self._cross_concat_dim = (
+            self._main_group_dim if self.cross_net is not None else 0
+        )
         deep_concat_dim = (
             self._main_group_dim
+            + self._cross_concat_dim
             + self._cdot_concat_dim
             + self._num_bias_features
         )
 
         self.component_ln = nn.ModuleDict()
         self.component_ln["main"] = nn.LayerNorm(self._main_group_dim)
+        if self.cross_net is not None:
+            self.component_ln["cross"] = nn.LayerNorm(self._main_group_dim)
         if self.cdot is not None:
             self.component_ln["allint_out"] = nn.LayerNorm(self.cdot.output_dim())
             if self._num_bias_features > 0:
@@ -167,28 +217,10 @@ class PEPNet_v2(MultiTaskRank):
     def _extract_bias(
         self, feature_tensors: List[torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        bias_vec_list = []
-        for ft in feature_tensors:
-            bias_vec_list.append(ft[:, 0:1])
-        bias_vec = torch.cat(bias_vec_list, dim=1)
-        bias_sum = bias_vec.sum(dim=1, keepdim=True)
-        return bias_vec, bias_sum
+        return _extract_bias_fn(feature_tensors)
 
-    def _extract_cdot(
-        self, feature_tensors: List[torch.Tensor]
-    ) -> torch.Tensor:
-        slots = []
-        for ft in feature_tensors:
-            if ft.size(1) >= self._cdot_input_dim:
-                slots.append(ft[:, : self._cdot_input_dim])
-            else:
-                pad = torch.zeros(
-                    ft.size(0),
-                    self._cdot_input_dim - ft.size(1),
-                    device=ft.device,
-                )
-                slots.append(torch.cat([ft, pad], dim=1))
-        return torch.stack(slots, dim=1)
+    def _extract_cdot(self, feature_tensors: List[torch.Tensor]) -> torch.Tensor:
+        return _extract_cdot_fn(feature_tensors, self._cdot_input_dim)
 
     def predict(self, batch: Batch) -> Dict[str, torch.Tensor]:
         """Forward the model.
@@ -223,7 +255,12 @@ class PEPNet_v2(MultiTaskRank):
                 )
             bias_vec, bias_sum = self._extract_bias(bias_feature_tensors)
         else:
-            bias_sum = torch.zeros(main_features.size(0), 1, device=main_features.device)
+            bias_sum = torch.zeros(
+                main_features.size(0), 1, device=main_features.device
+            )
+
+        if self.cross_net is not None:
+            cross_output = self.cross_net(main_features)
 
         if self.cdot is not None:
             if self._cdot_group_name == self._main_group_name:
@@ -243,12 +280,14 @@ class PEPNet_v2(MultiTaskRank):
 
         concat_parts = []
         concat_parts.append(self.component_ln["main"](main_features))
+        if self.cross_net is not None:
+            concat_parts.append(self.component_ln["cross"](cross_output))
         if self.cdot is not None:
             concat_parts.append(self.component_ln["allint_out"](allint_out))
-            if bias_vec.numel() > 0:
+            if self._num_bias_features > 0:
                 concat_parts.append(self.component_ln["bias"](bias_vec))
             concat_parts.append(self.component_ln["allint_mid"](allint_mid_out))
-        elif bias_vec.numel() > 0:
+        elif self._num_bias_features > 0:
             concat_parts.append(self.component_ln["bias"](bias_vec))
         deep_input = torch.cat(concat_parts, dim=1)
 

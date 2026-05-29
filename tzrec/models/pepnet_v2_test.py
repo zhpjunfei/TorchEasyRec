@@ -1,6 +1,17 @@
+# Copyright (c) 2025, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Tests for PEPNet_v2 model."""
+
 import unittest
-from collections import OrderedDict
 
 import torch
 from torchrec import KeyedJaggedTensor, KeyedTensor
@@ -8,13 +19,13 @@ from torchrec import KeyedJaggedTensor, KeyedTensor
 from tzrec.datasets.utils import BASE_DATA_GROUP, Batch
 from tzrec.features.feature import create_features
 from tzrec.models.pepnet_v2 import PEPNet_v2
-from tzrec.protos import feature_pb2, model_pb2, module_pb2, loss_pb2, tower_pb2
+from tzrec.protos import feature_pb2, loss_pb2, model_pb2, module_pb2, tower_pb2
 from tzrec.protos.models import multi_task_rank_pb2
 from tzrec.utils.state_dict_util import init_parameters
 
 
 class PEPNet_v2Test(unittest.TestCase):
-    def _run_test(self, use_cdot=False):
+    def _run_test(self, use_cdot=False, use_dcnv2=False):
         feature_cfgs = [
             feature_pb2.FeatureConfig(
                 id_feature=feature_pb2.IdFeature(
@@ -92,6 +103,8 @@ class PEPNet_v2Test(unittest.TestCase):
                     input_dim=4, output_dim=2, mid_dim=4, compress_hidden_units=[8, 6]
                 )
             )
+        if use_dcnv2:
+            pepnet_v2_config.dcnv2.CopyFrom(module_pb2.CrossV2(cross_num=2, low_rank=4))
 
         model_config = model_pb2.ModelConfig(
             feature_groups=feature_groups, pepnet_v2=pepnet_v2_config
@@ -132,6 +145,12 @@ class PEPNet_v2Test(unittest.TestCase):
 
     def test_pepnet_v2_with_cdot(self):
         self._run_test(use_cdot=True)
+
+    def test_pepnet_v2_with_dcnv2(self):
+        self._run_test(use_dcnv2=True)
+
+    def test_pepnet_v2_with_cdot_and_dcnv2(self):
+        self._run_test(use_cdot=True, use_dcnv2=True)
 
 
 if __name__ == "__main__":

@@ -63,7 +63,15 @@ from torchrec.distributed.planner.types import (
     Storage,
     Topology,
 )
-from torchrec.distributed.planner.utils import build_sharder_data_map
+
+try:
+    from torchrec.distributed.planner.utils import build_sharder_data_map
+except ImportError:
+
+    def build_sharder_data_map(sharder_map):  # type: ignore[misc]
+        return None
+
+
 from torchrec.distributed.sharding_plan import (
     get_default_sharders as _get_default_sharders,
 )
@@ -542,7 +550,11 @@ class EmbeddingStorageEstimator(ShardEstimator):
             return
 
         for sharding_option in sharding_options:
-            sharder_key = sharding_option.module_type_key
+            sharder_key = (
+                sharding_option.module_type_key
+                if hasattr(sharding_option, "module_type_key")
+                else sharder_name(type(sharding_option.module[1]))
+            )
             sharder = sharder_map[sharder_key]
 
             caching_ratio = sharding_option.cache_load_factor

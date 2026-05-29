@@ -162,4 +162,7 @@ message PEPNet_v2 {
     repeated TaskTower task_towers = 14;
     // whether to add ctr logits to cvr
     optional bool cvr_add_ctr_logits = 15 [default = true];
+
+    // DCNv2 cross network config
+    optional CrossV2 dcnv2 = 16;
 }
