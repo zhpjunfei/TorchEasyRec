@@ -25,7 +25,7 @@ from tzrec.utils.state_dict_util import init_parameters
 
 
 class PEPNet_v2Test(unittest.TestCase):
-    def _run_test(self, use_cdot=False, use_dcnv2=False):
+    def _run_test(self, use_cdot=False, use_dcnv2=False, use_relation_mlp=False):
         feature_cfgs = [
             feature_pb2.FeatureConfig(
                 id_feature=feature_pb2.IdFeature(
@@ -105,6 +105,11 @@ class PEPNet_v2Test(unittest.TestCase):
             )
         if use_dcnv2:
             pepnet_v2_config.dcnv2.CopyFrom(module_pb2.CrossV2(cross_num=2, low_rank=4))
+        if use_relation_mlp:
+            pepnet_v2_config.task_towers[1].relation_tower_names.append("ctr")
+            pepnet_v2_config.task_towers[1].relation_mlp.CopyFrom(
+                module_pb2.MLP(hidden_units=[4, 2])
+            )
 
         model_config = model_pb2.ModelConfig(
             feature_groups=feature_groups, pepnet_v2=pepnet_v2_config
@@ -151,6 +156,12 @@ class PEPNet_v2Test(unittest.TestCase):
 
     def test_pepnet_v2_with_cdot_and_dcnv2(self):
         self._run_test(use_cdot=True, use_dcnv2=True)
+
+    def test_pepnet_v2_with_relation_mlp(self):
+        self._run_test(use_relation_mlp=True)
+
+    def test_pepnet_v2_cdot_dcnv2_relation_mlp(self):
+        self._run_test(use_cdot=True, use_dcnv2=True, use_relation_mlp=True)
 
 
 if __name__ == "__main__":

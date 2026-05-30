@@ -20,6 +20,7 @@ from tzrec.models.multi_task_rank import MultiTaskRank
 from tzrec.modules.cdot import CDOT
 from tzrec.modules.interaction import CrossV2
 from tzrec.modules.lhuc_net import LHUC_EPNet, LHUC_PPNet
+from tzrec.modules.mlp import MLP
 from tzrec.protos.model_pb2 import ModelConfig
 from tzrec.utils.config_util import config_to_kwargs
 
@@ -65,6 +66,7 @@ class PEPNet_v2(MultiTaskRank):
     - LHUC-EPNet: tanh-based scaling (range [-4, 6]) for personalization
     - LHUC-PPNet: per-layer increasing tanh scale, scale-before-Dense (matching TF)
     - CVR logit-level addition with CTR logits
+    - Relation MLP: CVR tower receives CTR tower hidden via learned MLP
     - No hard domain splitting (soft personalization via LHUC)
     """
 
@@ -192,18 +194,18 @@ class PEPNet_v2(MultiTaskRank):
         )
 
         self._task_towers = nn.ModuleList()
+        self._tower_final = nn.ModuleDict()
+        self._relation_mlps = nn.ModuleDict()
         self._ctr_tower_name = None
         for tower_cfg in self._task_tower_cfgs:
             tower_kwargs = config_to_kwargs(tower_cfg)
             mlp_cfg = tower_kwargs.get("mlp", {"hidden_units": [512, 256, 128]})
-            nn_dims = list(mlp_cfg.get("hidden_units", [512, 256, 128])) + [
-                tower_cfg.num_class
-            ]
+            hidden_units = list(mlp_cfg.get("hidden_units", [512, 256, 128]))
             self._task_towers.append(
                 LHUC_PPNet(
                     input_dim=deep_concat_dim,
                     lhuc_dim=self._lhuc_group_dim,
-                    nn_dims=nn_dims,
+                    nn_dims=hidden_units,
                     nn_activation=ppnet_activation,
                     lhuc_hidden_units=ppnet_lhuc_hidden,
                 )
@@ -211,6 +213,30 @@ class PEPNet_v2(MultiTaskRank):
             tower_name = tower_cfg.tower_name
             if tower_name == "ctr":
                 self._ctr_tower_name = tower_name
+
+        # Build tower_final and relation_mlps
+        tower_hidden_dim = hidden_units[-1] if hidden_units else deep_concat_dim
+        for tower_cfg in self._task_tower_cfgs:
+            tower_name = tower_cfg.tower_name
+            if tower_cfg.HasField("relation_mlp"):
+                relation_input_dim = tower_hidden_dim
+                for rel_name in tower_cfg.relation_tower_names:
+                    if rel_name in self._relation_mlps:
+                        relation_input_dim += self._relation_mlps[rel_name].output_dim()
+                    else:
+                        relation_input_dim += tower_hidden_dim
+                self._relation_mlps[tower_name] = MLP(
+                    in_features=relation_input_dim,
+                    **config_to_kwargs(tower_cfg.relation_mlp),
+                )
+                self._tower_final[tower_name] = nn.Linear(
+                    self._relation_mlps[tower_name].output_dim(),
+                    tower_cfg.num_class,
+                )
+            else:
+                self._tower_final[tower_name] = nn.Linear(
+                    tower_hidden_dim, tower_cfg.num_class
+                )
 
         self._cvr_add_ctr_logits = self._model_config.cvr_add_ctr_logits
 
@@ -296,22 +322,43 @@ class PEPNet_v2(MultiTaskRank):
             ep_scale = self.epnet(lhuc_features)
             deep_input = deep_input * ep_scale
 
-        tower_outputs = {}
-        ctr_logits = None
+        # Step 1: compute tower hidden states (penultimate PPNet output)
+        tower_hidden = {}
         for i, task_tower_cfg in enumerate(self._task_tower_cfgs):
             tower_name = task_tower_cfg.tower_name
-            tower_input = deep_input
             lhuc_input = lhuc_features if self.epnet is not None else deep_input
-            tower_output = self._task_towers[i](tower_input, lhuc_input)
+            tower_hidden[tower_name] = self._task_towers[i](deep_input, lhuc_input)
 
-            if ctr_logits is not None and self._cvr_add_ctr_logits:
-                tower_output = tower_output + ctr_logits
+        # Step 2: compute relation_mlp outputs (in config order; relation towers must
+        # appear before towers that depend on them)
+        relation_hidden = {}
+        for task_tower_cfg in self._task_tower_cfgs:
+            tower_name = task_tower_cfg.tower_name
+            if task_tower_cfg.HasField("relation_mlp"):
+                rel_inputs = [tower_hidden[tower_name]]
+                for rel_name in task_tower_cfg.relation_tower_names:
+                    rel_inputs.append(relation_hidden[rel_name])
+                relation_hidden[tower_name] = self._relation_mlps[tower_name](
+                    torch.cat(rel_inputs, dim=1)
+                )
+            else:
+                relation_hidden[tower_name] = tower_hidden[tower_name]
+
+        # Step 3: compute final logits
+        tower_outputs = {}
+        ctr_logits_val = None
+        for task_tower_cfg in self._task_tower_cfgs:
+            tower_name = task_tower_cfg.tower_name
+            tower_output = self._tower_final[tower_name](relation_hidden[tower_name])
+
+            if ctr_logits_val is not None and self._cvr_add_ctr_logits:
+                tower_output = tower_output + ctr_logits_val
             else:
                 tower_output = tower_output + bias_sum
 
             tower_outputs[tower_name] = tower_output
 
             if tower_name == self._ctr_tower_name:
-                ctr_logits = tower_output
+                ctr_logits_val = tower_output
 
         return self._multi_task_output_to_prediction(tower_outputs)

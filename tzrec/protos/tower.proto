@@ -54,6 +54,11 @@ message TaskTower {
     optional float out_task_space_weight = 11 [default = 1.0];
     // use pareto front minimal loss weight, ge 0 and lt 1
     optional float pareto_min_loss_weight = 12 [default = 0.0];
+
+    // related tower names for relation mlp
+    repeated string relation_tower_names = 13;
+    // relation mlp config
+    optional MLP relation_mlp = 14;
 };
 
 message BayesTaskTower {
