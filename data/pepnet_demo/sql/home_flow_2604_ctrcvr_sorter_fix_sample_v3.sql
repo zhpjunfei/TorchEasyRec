@@ -1895,14 +1895,20 @@ LEFT JOIN   (
             ) sq45
 ON      sq0.mmb_id = sq45.mmb_id
 LEFT JOIN   (
-                SELECT  *
-                        ,ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY fs_write_time ) AS write_order
-                FROM    feature_mall_feed_rec_flow_item_title_embedding_v4_offline
-                WHERE   dt >= '20251120' -- TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-90,'dd'),'yyyymmdd')
-                AND     title_vector IS NOT NULL
+                SELECT  item_id, title_vector, sub_title_vector
+                FROM    (
+                            SELECT  item_id
+                                    ,title_vector
+                                    ,sub_title_vector
+                                    ,ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY fs_write_time DESC) AS write_order
+                            FROM    feature_mall_feed_rec_flow_item_title_embedding_v4_offline
+                            WHERE   dt >= '20251120'
+                            AND     dt <= TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+                            AND     title_vector IS NOT NULL
+                        ) t
+                WHERE   write_order = 1
             ) sq1
 ON      sq0.item_id = sq1.item_id
-AND     sq1.write_order = 1
 LEFT JOIN   (
                 SELECT  *
                 FROM    home_flow_2604_item_id_static_feat_15d_v1
