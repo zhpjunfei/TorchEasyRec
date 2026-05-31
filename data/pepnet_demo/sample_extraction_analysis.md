@@ -163,6 +163,25 @@ T+1 管线下，构建 `dt=T` 时 `dt=T+1` 分区不存在，跨天转化必然�
  修正构建: conv 读到 T     → 转化被捕获   → ✅ 追回
 ```
 
+### Embedding 表防穿越
+
+`fix_sample_v3.sql` 中拼接 `feature_mall_feed_rec_flow_item_title_embedding_v4_offline`（小时级增量更新）时的防穿越处理：
+
+```sql
+ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY fs_write_time DESC) AS write_order
+WHERE dt >= '20251120'                          -- 数据有效起始分区
+  AND dt <= TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')  -- 截止到昨天
+  AND title_vector IS NOT NULL
+```
+
+| 改动                          |              防止的穿越              | 原因                                |
+| ----------------------------- | :----------------------------------: | ----------------------------------- |
+| `ORDER BY fs_write_time DESC` |          取最新版而非最旧版          | 原写法 `ASC` 取了最早版本           |
+| `dt <= bizdate-1`             | 今天小时级增量写入不会污染昨天的样本 | 构建 T-1 时，T 的写入尚不存在于线上 |
+| 保留 `dt >= '20251120'`       |       不引入该分区前的无效数据       | 该表在此日期后才上线或模型升级      |
+
+不采用 `fs_write_time <= event_unix_time` 的关联子查询方案，原因：ODPS 逐行执行不可接受；`dt <= bizdate-1` 截断已覆盖主要穿越场景。
+
 ### 转换归因验证
 
 ```
@@ -184,9 +203,11 @@ v3 (无 GROUP BY, 逐条判断):
 
 ## 各版 SQL 文件
 
-| 文件              | 说明                                                                             |     状态      |
-| ----------------- | -------------------------------------------------------------------------------- | :-----------: |
-| `sql/...v1.sql`   | 原始版：GROUP BY + click_cnt>0                                                   |   当前线上    |
-| `sql/...new.sql`  | v1 改进版：逐条曝光 + 30min+24h 归因，但点击 GROUP BY 漏标 + 新表                |   ❌ 有 Bug   |
-| `sql/...new2.sql` | v2 改进版：ROW_NUMBER + LEFT JOIN + 写原表，但转化窗口不对                       | 🟡 转化归因错 |
-| `sql/...v3.sql`   | **融合版**：单脚本双 INSERT（正常 dt=T + 修正 dt=T-1），归因正确 + 独立新表 \_v3 |    ✅ 推荐    |
+| 文件                         | 说明                                                                                                         |     状态      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------ | :-----------: |
+| `sql/...v1.sql`              | 原始版：GROUP BY + click_cnt>0                                                                               |   当前线上    |
+| `sql/...new.sql`             | v1 改进版：逐条曝光 + 30min+24h 归因，但点击 GROUP BY 漏标 + 新表                                            |   ❌ 有 Bug   |
+| `sql/...new2.sql`            | v2 改进版：ROW_NUMBER + LEFT JOIN + 写原表，但转化窗口不对                                                   | 🟡 转化归因错 |
+| `sql/...v3.sql`              | **标签构建**：单脚本双 INSERT（正常 dt=T + 修正 dt=T-1），归因正确 + 独立新表 \_v3                           |    ✅ 推荐    |
+| `sql/...fix_sample_v3.sql`   | **特征拼接**：基于 v3 标签拼接特征，含 embedding 防穿越（`dt <= bizdate-1` + `ORDER BY fs_write_time DESC`） |    开发中     |
+| `model_architecture_plan.md` | **PEPNET_DCN_PLE** 架构设计方案                                                                              |    待实现     |
