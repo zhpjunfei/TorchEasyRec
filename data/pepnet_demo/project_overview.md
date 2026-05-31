@@ -253,71 +253,9 @@ CTR +0.16pp 说明 tower bias 确实被拉高了——搜索的 48% CTR 带动�
 
 此 config **不再使用**，保留仅作记录。
 
-## 样本提取分析
+## 样本提取
 
-### 当前逻辑（单级聚合）
-
-训练数据只做 **按天 GROUP BY (mmb_id, item_id)** 去重，没有跨天去重。3 天曝光去重是**线上的服务端过滤策略**（避免同一商品短期内重复曝光给同一用户），不影响训练样本。
-
-```sql
--- ctr_label CTE
-SELECT  MIN(event_unix_time), item_id, mmb_id, ...
-        ,MAX(IF(event='click',1,0)) AS is_click
-        ,MAX(IF(event='conversion',1,0)) AS is_conversion
-FROM    home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_preprocess_v1
-WHERE   dt = '${bdp.system.bizdate}'       -- 单天
-GROUP BY item_id, mmb_id                    -- 每(user,item)=1行/天
-```
-
-产出：`home_flow_2604_ctrcvr_sorter_label_table_v1` 每天一个分区。多条天分区直接 union 作为训练数据，**不做额外去重**。
-
-### 按天 GROUP BY 的效果
-
-同一天内同一个 (user, item) 的所有事件（曝光、点击、转化）聚合为 1 行：
-
-| 原始事件序列                                | 聚合后                               |
-| ------------------------------------------- | ------------------------------------ |
-| 曝光 A → 曝光 A → 点击 A                    | is_click=1 ✅ 正确                   |
-| 曝光 B → 曝光 B（无点击）                   | is_click=0 ✅ 正确                   |
-| 曝光 C → 曝光 C → 点击 C → 曝光 C（第二次） | is_click=1 ⚠️ 第二次曝光的负信号被吞 |
-
-第三种情况（先点击再二次曝光）——当天的第二次曝光本应是负样本（已经在同一天点击过了，模型应学习"已点击过的商品不需要再推荐"），但被 max 聚合为正样本。不过按天的粒度下，这种情况较少。
-
-### `click_cnt > 0` 时序过滤
-
-```sql
-SUM(is_click) OVER (
-  PARTITION BY mmb_id
-  ORDER BY event_unix_time
-  ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
-) AS click_cnt
-```
-
-操作对象：当天按 `MIN(event_unix_time)` 排序的 (user, item) 行序列。
-
-例：用户当天依次交互 A(click)、B、C、D：
-
-| 商品 | is_click |  click_cnt   |        保留？        |
-| ---- | :------: | :----------: | :------------------: |
-| A    |    1     | (none+1+0)=1 |    ✅ 自己有点击     |
-| B    |    0     |  (1+0+0)=1   | ✅ 在 A 后面（相邻） |
-| C    |    0     |  (0+0+0)=0   |     ❌ 离 A 太远     |
-| D    |    0     | (0+0+none)=0 |     ❌ 离 A 太远     |
-
-这是**时序难例负采样**——只保留"点击附近"的未点击商品。剔除的是远离点击的商品（用户不感兴趣、或者根本没注意到）。这种采样假设"远离点击的曝光不是好的训练信号"，但有偏——线上推理时大量未点击商品并不在点击商品"附近"。
-
-### 对精排的影响
-
-| 问题                   | 严重程度 | 说明                                                        |
-| ---------------------- | :------: | ----------------------------------------------------------- |
-| 无法按 request 分组    |    🔴    | GROUP BY 后 request_id 聚合丢失，每行无法归属到具体 request |
-| `click_cnt>0` 样本有偏 |    🟡    | 负样本局限于点击商品附近，不代表全量曝光分布                |
-| 正样本膨胀             |    🟢    | 仅在同一天同义商品二次曝光场景发生，影响有限                |
-| 多天分区直接 union     |    🟢    | 无跨天去重，不同天的相同 (user,item) 各自独立保留为不同样本 |
-
-### 与 v1c 2.6pp 差距的关系
-
-排除 tower 过参数化后，差距来自模型架构本身。当前 SQL 对 v1c 和 PEPNet_v2 是**完全相同的输入**，不是差距的来源。
+当前样本逻辑、问题分析和优化方案详见 `sample_extraction_analysis.md`。
 
 ## 文件清单
 
@@ -333,13 +271,14 @@ SUM(is_click) OVER (
 
 ## 数据扩展 Config
 
-| Config                     | 位置                                       | 变更                               |              状态               |
-| -------------------------- | ------------------------------------------ | ---------------------------------- | :-----------------------------: |
-| freqpage16                 | `v4/..._freqpage16.config`                 | f_req_page emb=4→16, vocab→hash    |             ❌ 放弃             |
-| cdot32                     | `v4/..._cdot32.config`                     | freqpage16 + emb=32 + input_dim=32 |             ❌ 放弃             |
-| nofreqpage                 | `home_flow_2604_pepnet_nofreqpage.config`  | 去掉 f_req_page                    |            ➖ 无影响            |
-| cdot32_weight03            | `v4/..._cdot32_weight03.config`            | cdot32 + 搜索样本 `weight: 0.3`    |      ✅ CVR ±0, CTR +0.2pp      |
-| cdot32_weight03_nofreqpage | `v4/..._cdot32_weight03_nofreqpage.config` | weight03 + 去掉 f_req_page         |            🔄 运行中            |
-| v5_v1ctower                | `v5/..._v5_v1ctower.config`                | tower [512,256,128] → [128,64,32]  | ❌ CTR 0.695 / CVR 0.742 无提升 |
-| v5_2epochs                 | `v5/..._v5_2epochs.config`                 | num_epochs 1→2, T_max 6300→12655   |            ❌ 过拟合            |
-| v5_baseline                | `v5/..._v5_baseline.config`                | cdot32_weight03 移入 v5 作为锚点   |                —                |
+| Config                     | 位置                                       | 变更                                                                          |              状态               |
+| -------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------- | :-----------------------------: |
+| freqpage16                 | `v4/..._freqpage16.config`                 | f_req_page emb=4→16, vocab→hash                                               |             ❌ 放弃             |
+| cdot32                     | `v4/..._cdot32.config`                     | freqpage16 + emb=32 + input_dim=32                                            |             ❌ 放弃             |
+| nofreqpage                 | `home_flow_2604_pepnet_nofreqpage.config`  | 去掉 f_req_page                                                               |            ➖ 无影响            |
+| cdot32_weight03            | `v4/..._cdot32_weight03.config`            | cdot32 + 搜索样本 `weight: 0.3`                                               |      ✅ CVR ±0, CTR +0.2pp      |
+| cdot32_weight03_nofreqpage | `v4/..._cdot32_weight03_nofreqpage.config` | weight03 + 去掉 f_req_page                                                    |            🔄 运行中            |
+| v5_v1ctower                | `v5/..._v5_v1ctower.config`                | tower [512,256,128] → [128,64,32]                                             | ❌ CTR 0.695 / CVR 0.742 无提升 |
+| v5_2epochs                 | `v5/..._v5_2epochs.config`                 | num_epochs 1→2, T_max 6300→12655                                              |            ❌ 过拟合            |
+| v5_baseline                | `v5/..._v5_baseline.config`                | cdot32_weight03 移入 v5 作为锚点                                              |                —                |
+| 样本提取 v3                | `sql/..._v3.sql`                           | 融合版：保留原表 + ROW_NUMBER 去重 + 30min 点击 + 点击后 24h 转化 + 回看 1 天 |             ✅ 推荐             |
