@@ -127,59 +127,32 @@ class PEPNetDCNPLE(MultiTaskRank):
 | 参数共享   |     cvr_add_ctr_logits     | shared experts + cvr_add_ctr_logits |
 | tower 内   |    LHUC_PPNet 逐层缩放     |     LHUC_PPNet 逐层缩放（保留）     |
 | tower 输入 | EPNet 输出直接进入各 tower |  EPNet 输出先经多层 ExtractionNet   |
+| tower MLP  | [512,256,128] + PPNet 缩放 |        [128,64] + PPNet 缩放        |
+| PPNet      |    [512,256,128] (3层)     |           [256,128] (2层)           |
 
-## 配置结构
+## 配置模板
 
-```protobuf
-feature_groups: { ... }
-pepnet_dcn_ple {
-    main_group_name: "all"
-    lhuc_group_name: "domain"
+`data/pepnet_demo/config/home_flow_2604_pepnet_dcn_ple.config`，基于 `home_flow_2604_pepnet.config` 修改。
 
-    epnet_hidden_unit: 256
-    ppnet_hidden_units: [256, 128, 64]
-    ppnet_activation: "nn.ReLU"
+与 PEPNet_v2 基线相比的关键变化：
 
-    dcnv2 { cross_num: 4, low_rank: 32 }
-    cdot { input_dim: 16, output_dim: 4, mid_dim: 32 }
+| 配置项                   | PEPNet_v2       | PEPNetDCNPLE          | 原因                                   |
+| ------------------------ | --------------- | --------------------- | -------------------------------------- |
+| `model`                  | `pepnet_v2`     | `pepnet_dcn_ple`      | 切换架构                               |
+| `epnet_gamma`            | `2.0`           | 省略（默认 2.0）      | 默认值等价                             |
+| `ppnet_hidden_units`     | `[512,256,128]` | `[256,128]`           | ExtractionNet 已做路由，PPNet 层数减少 |
+| Tower MLP `hidden_units` | `[512,256,128]` | `[128,64]`            | Extraction experts 承担大部分任务学习  |
+| `extraction_networks`    | 无              | 2 层 CGC              | PLE 核心：逐层任务分离                 |
+| `batch_size`             | `4096`          | `16384`               | 样本量 8x（3M→24M）                    |
+| `T_max`                  | `6300`          | `10000`               | step-based 训练，长周期 cosine decay   |
+| `warmup_size`            | `1000`          | `2000`                | 大 batch 需要更多 warmup               |
+| `part_optimizers regex`  | ppnet/gate/cdot | + extraction_networks | 新增 expert MLP weight decay           |
 
-    extraction_networks {
-        network_name: "layer1"
-        expert_num_per_task: 2
-        share_num: 2
-        task_expert_net { hidden_units: [256, 128], activation: "nn.ReLU" }
-        share_expert_net { hidden_units: [256, 128], activation: "nn.ReLU" }
-    }
-    extraction_networks {
-        network_name: "layer2"
-        expert_num_per_task: 2
-        share_num: 2
-        task_expert_net { hidden_units: [128, 64], activation: "nn.ReLU" }
-        share_expert_net { hidden_units: [128, 64], activation: "nn.ReLU" }
-    }
+## 实现状态
 
-    task_towers {
-        tower_name: "ctr"
-        label_name: "is_click"
-        num_class: 1
-        mlp { hidden_units: [64, 32] }
-    }
-    task_towers {
-        tower_name: "cvr"
-        label_name: "is_conversion"
-        num_class: 1
-        mlp { hidden_units: [64, 32] }
-    }
-
-    cvr_add_ctr_logits: true
-}
-```
-
-## 实现步骤
-
-1. Proto 修改（multi_task_rank.proto + model.proto）+ 编译
-1. 新建 `tzrec/models/pepnet_dcn_ple.py`（继承 MultiTaskRank）
-1. LHUC_PPNet 替换 PLE 默认的 TaskTower MLP
-1. ExtractionNet 输出适配 LHUC_PPNet 输入
-1. 单元测试
-1. 配置模板
+- [x] Proto 修改（multi_task_rank.proto + model.proto）+ 编译
+- [x] `tzrec/models/pepnet_dcn_ple.py`（继承 MultiTaskRank）
+- [x] LHUC_PPNet 替换 PLE 默认的 TaskTower MLP
+- [x] ExtractionNet 输出适配 LHUC_PPNet 输入
+- [x] 单元测试（4 条，含 base/cdot/dcnv2/cdot+dcnv2）
+- [x] 配置模板 `home_flow_2604_pepnet_dcn_ple.config`

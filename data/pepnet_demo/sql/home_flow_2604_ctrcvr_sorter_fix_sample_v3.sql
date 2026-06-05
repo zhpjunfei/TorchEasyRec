@@ -1,5 +1,11 @@
 SET odps.namespace.schema = true;
 
+-- ALTER TABLE feature_mall_home_flow_2604_ctrcvr_sorter_v3_training_set
+-- ADD COLUMNS (
+--     pub_hours_aligned DOUBLE COMMENT '对齐线上的发布时间差(小时)，负值已钳位为0',
+--     is_reedited_after_exposure BIGINT COMMENT '是否曝光后被运营二次编辑(1是0否)'
+-- );
+
 CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3_training_set
 (
     event_unix_time                                                  BIGINT
@@ -918,6 +924,8 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3
     ,his_high_level                                                  STRING
     ,f_req_page                                                      STRING
     ,f_req_domain                                                    STRING
+    ,pub_hours_aligned                                               DOUBLE
+    ,is_reedited_after_exposure                                      BIGINT
 )
 PARTITIONED BY
 (
@@ -1856,6 +1864,10 @@ SELECT  sq0.event_unix_time
         THEN split(sq0.scene, '#')[2]
         ELSE NULL
         END AS f_req_domain
+        -- 主特征：严格对齐线上，负值钳位为 0
+        ,round((sq0.event_unix_time - LEAST(sq55.pub_time, sq0.event_unix_time)) / 3600.0, 2) AS pub_hours_aligned
+        -- 辅助特征：保留“运营编辑/二次上架”的业务信号
+        ,IF(sq55.pub_time > sq0.event_unix_time, 1, 0) AS is_reedited_after_exposure
 FROM    (
             SELECT  *
             FROM    home_flow_2604_ctrcvr_sorter_label_table_v3

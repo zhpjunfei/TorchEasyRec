@@ -56,7 +56,44 @@
 | 22  | v1ctower | cdot32_weight03 | tower → [128,64,32]       | **0.695** | **0.742** | ❌ 排除 tower 过参数化  |
 | 23  | 2epochs  | cdot32_weight03 | num_epochs=2, T_max=12655 |  过拟合   |  过拟合   | ❌ 第2个 epoch AUC 下降 |
 
-## 关键结论
+## 🔴 之前结论有误（2026-06-01 更新）
+
+### 背景
+
+之前声称 "constant_lr 从 0.74162 提升到 0.76970" 的结论是 **confounded**：
+
+| 配置                             | LR 策略      | weight_decay |   CVR AUC    |
+| -------------------------------- | ------------ | :----------: | :----------: |
+| 集群 pepnet.config（含 wd=0.01） | cosine       |   ✅ 0.01    |   0.74162    |
+| 集群 pepnet.config + constant_lr | constant     |    ❌ 无     | **0.76970**  |
+| **本地 pepnet.config**           | **cosine**   |  **❌ 无**   |  **0.742**   |
+| **本地 pepnet_fixedlr.config**   | **constant** |  **❌ 无**   | **0.730** ❌ |
+
+本地 pepnet.config（cosine, 无 wd）→ CVR 0.742。仅改 constant_lr → **CVR 0.730，反而降了 1.2pp**。
+
+0.76970 的实验同时改了两个变量（cosine→constant + 去掉 wd=0.01），无法归因于 constant_lr。且该实验在集群版本上运行，与本地的 pepnet.config 版本不同。
+
+### 当前结论
+
+```
+当前基线 pepnet.config（cosine LR，无 weight_decay）
+  CTR AUC = 0.693
+  CVR AUC = 0.742 ✅ 最优
+
+pepnet_fixedlr（constant_lr 0.001，无 weight_decay）
+  CTR AUC = 0.694
+  CVR AUC = 0.730 ❌ 更差
+```
+
+**cosine LR 在当前配置下优于 constant_lr（0.742 vs 0.730）。之前的所有关于 "CVR gap 是 LR 问题" 的结论均已推翻。**
+
+### 经验教训
+
+- **变量隔离**：比较 cosine vs constant 时，必须保持 weight_decay / part_optimizers 不变
+- **基线确认**：local config 和 cluster config 的版本差异导致 0.76970 不可复现
+- **单变量原则**：一个实验只改一个变量
+
+## 关键结论（已修正）
 
 1. **DCNv2 有效** — cross_num=4, low_rank=256，CDOT domain + DCNv2 比纯 nocdot 高 +0.7pp CTR, +0.4pp CVR
 1. **CDOT all 无用，CDOT domain 有用** — domain group 信号干净，CDOT 能学到东西
@@ -67,12 +104,13 @@
 1. **搜索样本降权 0.3 有效** — 全量搜索数据导致 CVR -0.3pp，降权到 0.3 后 CVR 恢复（0.742），CTR 仍 +0.2pp。embedding 受益 + tower 保护 = 双赢
 1. **1 epoch 最优** — 3 epoch 过拟合严重 (CTR 0.658, CVR 0.704)
 1. **warmup 有效** — 500→1000 带来 +0.2pp
-1. **超参数已接近天花板** — 第二阶段所有微调效果 ±0.1pp 以内震荡
-1. **v1c CVR 0.768 有 2.6pp 差距** — tower 过参数化 ❌、训练步数不足 ❌ 均已排除
-1. **训练样本仅按天 GROUP BY (mmb_id, item_id)** — 无跨天去重。click_cnt>0 时序过滤只保留点击商品"附近"的负样本
-1. **核心假设：共享 bottom MLP vs MoE** — v1c 的 DBMtl 共享 4 层 MLP `[512,256,128,64]` 比 PEPNet_v2 的 EPNet 门控+专家更适合当前数据
+1. **cosine LR > constant_lr** — 当前基线无 weight_decay 时 cosine（0.742）优于 constant（0.730）
+1. ~~CVR 2.8pp 差距根因 LR 太低~~ → ❌ **推翻**：confounded 结论，不可复现
+1. ~~架构性差距~~ → ❌ **推翻但未替代**：CVR gap（0.742 vs 0.768）根因仍未知
 
-## 综合最优配置
+## 综合最优配置（待验证）
+
+基于 constant_lr 的新基线，配置待定。以下为候选：
 
 ```
 CDOT:       domain (mmb_id, item_id)
@@ -81,62 +119,79 @@ Bias:       domain
 LHUC:       domain
 cvr_add_ctr: true
 Tower:      [512, 256, 128], PPNet gamma=2.0
-Warmup:     cosine warmup 1000
-LR:         0.001
-Weight decay: 0.01 (仅 MLP.weight + cdot.sub_compress_weight)
-搜索降权:    CVR 塔 sample_weight_name=search_weight, search_price=0.3
+LR:         0.001 (constant)
+Weight decay: 无 (对齐 v1c)
 ```
 
-最佳 AUC: **CTR 0.694 / CVR 0.742**（搜索数据降权版 CTR 0.696 / CVR 0.742，可作为上线候选）
+## 最终结论（2026-06-01 更新）
 
-## 下一步方向
+### 23 组实验结论
 
-| 方向                                                     |   结果    |    状态     |
-| -------------------------------------------------------- | :-------: | :---------: |
-| ~~relation_mlp~~ — CVR 加 CTR hidden MLP                 | 0pp 冗余  |   ❌ 放弃   |
-| ~~domain2~~ — CDOT domain 加 page + KV                   | 0pp 无效  |   ❌ 放弃   |
-| ~~freqpage16~~ — 全 page 数据 + f_req_page 升维          |  -0.3pp   |   ❌ 放弃   |
-| **cdot32_weight03** — 搜索降权 0.3，CTR +0.2pp, CVR ±0pp | ✅ 正收益 | ✅ 上线候选 |
-| ~~f_req_page~~ — 该特征无贡献                            |    0pp    |   ❌ 可删   |
-| v1c 结构 diff — 找真正的差距                             |   未知    |  🔄 待验证  |
-| ~~v1ctower~~ — tower [128,64,32]                         | 0.742 ❌  |   ✅ 排除   |
-| ~~2epochs~~ — 更多训练步数                               | 过拟合 ❌ |   ✅ 排除   |
-| 共享 bottom MLP — 对齐 v1c 架构                          |   未知    |  🔄 待实验  |
+PEPNet_v2 在 warmup1000 + cvr_add_ctr 下达到当前最优：**CTR 0.694 / CVR 0.742**。
+v1c 基线 CVR **0.768** 高出 **2.6pp**。根因仍未知。
 
-## 最终结论
+### ⚠️ confounded 结论撤回
 
-经过 21 组实验，PEPNet_v2 在 warmup1000 + cvr_add_ctr 下达到最优：**CTR 0.694 / CVR 0.742**。
+之前的 "CVR gap 是 LR 问题" 结论基于 confounded 对比（同时改了 LR 和 weight_decay），且 cluster/local config 版本不一致导致的不可复现结果。已撤回。
 
-搜索数据降权 0.3（cdot32_weight03）可作为候选上线：CTR +0.2pp 且 CVR 不降，净正收益。其他所有结构差异（relation_mlp、CDOT 特征扩展、数据扩展）均已验证完毕。
+### 当前状态
 
-v1c 基线 CVR **0.768** 高出 **2.6pp**。
+| 配置                          |  CVR AUC  |              状态              |
+| ----------------------------- | :-------: | :----------------------------: |
+| pepnet.config（cosine LR）    | **0.742** |          ✅ 当前最优           |
+| pepnet_fixedlr（constant_lr） |   0.730   | ❌ 更差，confounded 结论已撤回 |
+| v1c（DBMtl_DCNv2）线上        | **0.768** |            ⭐ 目标             |
 
-v5 阶段两个瓶颈假设均被排除：
+### v6 计划
 
-- v1ctower：tower [512,256,128] → [128,64,32] → CTR 0.695 / CVR 0.742，**无变化** → ❌ tower 非瓶颈
-- 2epochs：第 2 个 epoch AUC 开始下降 → **过拟合** → ❌ 训练步数非瓶颈
+基于 f_req_domain 数据分析，验证 domain 粒度特征对 CVR 的影响。同时修复 f_req_page 编码缺陷（vocab_list 仅覆盖 2/9 page→hash_bucket_size）。
 
-**差距是架构性的**。核心假设指向 v1c 的**共享 bottom MLP**（DBMTL `[512,256,128,64]`）可能比 PEPNet_v2 的 EPNet MoE 更适合当前数据规模。
+两维度交叉 = 10 configs：
+
+| #   | Config                 | f_req_domain 用法                 |  f_req_page 编码   | 目的                        |
+| --- | ---------------------- | --------------------------------- | :----------------: | --------------------------- |
+| 1   | v6_baseline            | 无（对照）                        |     vocab_list     |                             |
+| 2   | v6_baseline_hbs        | 无                                |  hash_bucket_size  | f_req_page 修复本身有无影响 |
+| 3   | v6_domain_id_only      | id_feature 仅模型用               |     vocab_list     |                             |
+| 4   | v6_domain_id_only_hbs  | id_feature 仅模型用               |  hash_bucket_size  |                             |
+| 5   | v6_domain_replace      | domain group 替换 f_req_page      |     vocab_list     |                             |
+| 6   | v6_domain_replace_hbs  | domain group 替换 f_req_page      |  hash_bucket_size  |                             |
+| 7   | v6_domain_full_replace | 完全替换 f_req_page（id+group）   | —（无 f_req_page） |                             |
+| 8   | v6_domain_parallel     | 与 f_req_page 并行在 domain group |     vocab_list     |                             |
+| 9   | v6_domain_parallel_hbs | 与 f_req_page 并行在 domain group |  hash_bucket_size  |                             |
+
+（详见 `v6/` 目录）
 
 ## Config 文件
 
-| Config                               | 路径                                                |
-| ------------------------------------ | --------------------------------------------------- |
-| pepnet (基线)                        | `home_flow_2604_pepnet.config`                      |
-| pepnet_nocdot                        | `home_flow_2604_pepnet_nocdot.config`               |
-| pepnet_cdot_domain                   | `home_flow_2604_pepnet_cdot_domain.config`          |
-| 🏆 warmup1000 (最优 AUC)             | `v2/..._warmup1000.config`                          |
-| ⭐ cdot32_weight03 (上线候选)        | `v4/..._cdot32_weight03.config`                     |
-| pepnet_epoch3                        | `home_flow_2604_pepnet_epoch3.config`               |
-| pepnet_tower256                      | `home_flow_2604_pepnet_tower256.config`             |
-| pepnet_relation_mlp                  | `v3/..._relation_mlp.config`                        |
-| pepnet_relation_mlp_noadd            | `v3/..._relation_mlp_noadd.config`                  |
-| pepnet_domain2                       | `v3/..._domain2.config`                             |
-| pepnet_v4_freqpage16                 | `v4/..._freqpage16.config`                          |
-| pepnet_v4_cdot32                     | `v4/..._cdot32.config`                              |
-| pepnet_v4_cdot32_weight03            | `v4/..._cdot32_weight03.config`                     |
-| pepnet_v4_cdot32_weight03_nofreqpage | `v4/..._cdot32_weight03_nofreqpage.config` 🔄       |
-| pepnet_nofreqpage                    | `home_flow_2604_pepnet_nofreqpage.config`           |
-| v5_v1ctower                          | `v5/..._v5_v1ctower.config` — CTR 0.695 / CVR 0.742 |
-| v5_2epochs                           | `v5/..._v5_2epochs.config` 🔄                       |
-| v5_baseline                          | `v5/..._v5_baseline.config`                         |
+| Config                               | 路径                                                                          |
+| ------------------------------------ | ----------------------------------------------------------------------------- |
+| pepnet (基线)                        | `home_flow_2604_pepnet.config`                                                |
+| pepnet_nocdot                        | `home_flow_2604_pepnet_nocdot.config`                                         |
+| pepnet_cdot_domain                   | `home_flow_2604_pepnet_cdot_domain.config`                                    |
+| 🏆 warmup1000 (最优 AUC)             | `v2/..._warmup1000.config`                                                    |
+| ⭐ cdot32_weight03 (上线候选)        | `v4/..._cdot32_weight03.config`                                               |
+| pepnet_epoch3                        | `home_flow_2604_pepnet_epoch3.config`                                         |
+| pepnet_tower256                      | `home_flow_2604_pepnet_tower256.config`                                       |
+| pepnet_relation_mlp                  | `v3/..._relation_mlp.config`                                                  |
+| pepnet_relation_mlp_noadd            | `v3/..._relation_mlp_noadd.config`                                            |
+| pepnet_domain2                       | `v3/..._domain2.config`                                                       |
+| pepnet_v4_freqpage16                 | `v4/..._freqpage16.config`                                                    |
+| pepnet_v4_cdot32                     | `v4/..._cdot32.config`                                                        |
+| pepnet_v4_cdot32_weight03            | `v4/..._cdot32_weight03.config`                                               |
+| pepnet_v4_cdot32_weight03_nofreqpage | `v4/..._cdot32_weight03_nofreqpage.config` 🔄                                 |
+| pepnet_nofreqpage                    | `home_flow_2604_pepnet_nofreqpage.config`                                     |
+| ~~pepnet_fixedlr~~ (已撤回)          | ~~`home_flow_2604_pepnet_fixedlr.config`~~                                    |
+| v5_v1ctower                          | `v5/..._v5_v1ctower.config` — CTR 0.695 / CVR 0.742                           |
+| v5_2epochs                           | `v5/..._v5_2epochs.config` 🔄                                                 |
+| v5_baseline                          | `v5/..._v5_baseline.config`                                                   |
+| **v6_baseline**                      | `v6/..._v6_baseline.config`                                                   |
+| **v6_baseline_hbs**                  | `v6/..._v6_baseline_hbs.config`                                               |
+| **v6_domain_id_only**                | `v6/..._v6_domain_id_only.config`                                             |
+| **v6_domain_id_only_hbs**            | `v6/..._v6_domain_id_only_hbs.config`                                         |
+| **v6_domain_replace**                | `v6/..._v6_domain_replace.config`                                             |
+| **v6_domain_replace_hbs**            | `v6/..._v6_domain_replace_hbs.config`                                         |
+| **v6_domain_full_replace**           | `v6/..._v6_domain_full_replace.config`                                        |
+| **v6_domain_parallel**               | `v6/..._v6_domain_parallel.config`                                            |
+| **v6_domain_parallel_hbs**           | `v6/..._v6_domain_parallel_hbs.config`                                        |
+| **v6_domain_lsp**                    | `v6/..._v6_domain_lsp.config` — level + site + pub_hours_fg 加入 domain group |
