@@ -14,7 +14,7 @@
 | 场景     | 首页推荐流                                                                 |
 | 任务     | 多目标排序                                                                 |
 | 目标     | 点击率 (CTR) → 转化率 (CVR)                                                |
-| 样本     | 53 天训练 / 7 天验证                                                       |
+| 样本     | v6起: 7天无负采样训练 / 1天1%验证（此前: 53天含负采样 / 7天）              |
 | 特征     | ~100+ 特征（ID类/序列/KV/统计Ratio/Bias）                                  |
 | 指标     | AUC（CTR AUC, CVR AUC）                                                    |
 | 样本提取 | 3天 (mmb_id, item_id) 聚合去重，每条样本代表3天内一个(user,item)的交互聚合 |
@@ -87,13 +87,17 @@ Features → Embedding
 ## 实验设置
 
 - **框架**: TorchEasyRec 1.2.x, PyTorch 2.11, CUDA 12.9
-- **GPU**: NVIDIA A10 (sm_86)
+- **GPU**: NVIDIA A10 (sm_86) — 后续固定 **A10×2**（eff_batch=4096）
 - **训练**: 1 epoch, AdamW, cosine warmup 200
-- **Batch**: 4096
+- **Batch**: 2048 per-GPU（有效 batch = batch × GPU数）
 - **评估**: step-based (每 500 步)
 - **优化器**: AdamW, weight_decay 仅作用 MLP.weight + cdot.sub_compress_weight
 - **加速**: Torchrec SPMD 分布式训练
 - **v1c 基线**: CTR AUC **0.690** / CVR AUC **0.768** (同 53/7 分片)
+- **数据集变更（v6 起）**:
+  - 训练集: 7天无负采样（~1.5亿）, 之前: 53天含负采样（~530万）
+  - 验证集: 1天 1% 采样（~5万）, 之前: 7天
+  - v6 CTR 跳升至 0.787+、CVR 跳升至 0.764+ 主要来自数据集变更
 
 ## 实验结果汇总
 
@@ -151,6 +155,51 @@ PEPNet_v2 CTR 略好但 CVR 差距 2.6pp。当时认为架构性差距，后续�
 
 **当前基线 pepnet.config 最优**：CTR 0.693 / CVR 0.742。
 
+## ⚠️ v6 实验组关键反转：2 卡不提升 CVR，hash_fix 才是主因
+
+### 2026-06-06 更新：1/2 卡同 config 对比推翻了之前所有 GPU 数假说
+
+同一 config（vocab_list, 无 hash fix）：**1 卡 0.7638 > 2 卡 0.7566**。之前认为的"2 卡 CVR 高 0.786"全部来自 config 改进（hash fix + domain id），与 GPU 数无关。
+
+### 统一 2×A10 全景
+
+| Config                         | f_req_page                                         | f_req_domain |   模型    | CTR AUC |  CVR AUC   |            Δ 基线            |
+| :----------------------------- | -------------------------------------------------- | :----------- | :-------: | :-----: | :--------: | :--------------------------: |
+| v6_baseline                    | vocab_list (2/9)                                   | —            | PEPNet_v2 | 0.7880  |   0.7566   |              —               |
+| v6_baseline_hbs                | hash_bucket (9/9)                                  | —            | PEPNet_v2 | 0.7883  | **0.7822** |          **+2.6pp**          |
+| v6_domain_id_only_hbs          | hash_bucket                                        | id_feature   | PEPNet_v2 | 0.7928  |   0.7832   |            +0.1pp            |
+| v6_domain_id_only              | vocab_list                                         | id_feature   | PEPNet_v2 | 0.7909  |   0.7864   |       +0.3pp (vs hbs)        |
+| v6_domain_parallel_hbs         | hash_bucket                                        | CDOT group   | PEPNet_v2 | 0.7918  |   0.7843   |            +0.2pp            |
+| v6_ple 🏆                      | hash_bucket ⚠️（勘误: 此前标记为 vocab_list 有误） | —            |    PLE    | 0.7875  | **0.7878** |              🏆              |
+| v6_baseline_4gpu (T_max=40000) | —                                                  | —            | PEPNet_v2 |    —    | **0.7589** | ❌ T_max 未对齐，LR 轨迹不同 |
+
+### 推翻的四条结论
+
+1. ❌ **"2 卡优于 1 卡"** — 同 config 下 1 卡 0.764 > 2 卡 0.757。T_max 假说不成立。
+1. ❌ **"f_req_page 无用"** — 旧数据集结论不适用于新数据集。hash fix 贡献 **+2.6pp**。
+1. ❌ **"PLE 弱于 PEPNet"** — 1 卡时 PLE 0.748 < PEPNet 0.764；2 卡时 PLE 0.788 > PEPNet 0.782-0.786。PLE 对 batch 更敏感。
+1. ❌ **"f_req_domain 有价值"** — 在 hash_bucket 基线上 +0.1~0.3pp，噪声内。
+
+### 验证实验（T_max 修正后）
+
+⚠️ **v6_baseline_4gpu 的 T_max=40000 设置不当** — 与 2-GPU (T_max=73242) 相比，cosine 衰减比例只有 26% vs 52%，LR 轨迹不同，不能单独归因于 batch 效应。
+
+**修复方式**：按 steps/epoch 等比缩放 T_max，确保所有 GPU 数在 epoch 结束时衰减比例 ≈ 52.3%。
+
+| 实验                     |    GPU |   T_max    |   最终 LR    | 衰减比例  |      状态       |
+| :----------------------- | -----: | :--------: | :----------: | :-------: | :-------------: |
+| v6_baseline_hbs（参考）  |  2×A10 |   73242    |   0.000514   |   52.3%   | ✅ 已跑 0.7822  |
+| v6_baseline_1gpu（新）   |  1×A10 | **140000** | **0.000514** | **52.3%** |     🔄 待跑     |
+| v6_baseline_4gpu（已跑） | 4×V100 |   40000    |   0.000859   | 26.1% ⚠️  | ❌ 不可直接比较 |
+| v6_baseline_4gpu（修正） | 4×V100 | **37000**  | **0.000517** | **51.7%** |    🔄 需重跑    |
+
+**剩余本质差异**（T_max 修正后仍存在）：
+
+- 梯度噪声：小 batch（1-GPU）> 大 batch（4-GPU）
+- 更新次数：1-GPU 73242 步 vs 4-GPU 19142 步
+
+修正后若 1-GPU 或 4-GPU 仍低于 2-GPU，才确认 eff_batch=4096 为最优平衡点。
+
 ## 关键发现
 
 ### 验证的假设
@@ -163,35 +212,36 @@ PEPNet_v2 CTR 略好但 CVR 差距 2.6pp。当时认为架构性差距，后续�
 - ❌ **Domain 特征扩展无效** — 加 page + KV 特征后无变化
 - ✅ **1 epoch 最优** — CTR 电商场景 1 epoch 后过拟合
 
-### 当前瓶颈
+### 当前瓶颈 → 已超越 v1c
 
-- CVR 2.6pp 差距（PEPNet 0.742 vs v1c 0.768）**原因未完全确定** — constant_lr 误判为万能解，实际上 cosine LR 在当前基线表现更优（0.742 vs 0.730）。
-- ~~CVR 2.8pp gap 被 LR 解决~~ → ❌ confounded 结论，已推翻
-- ~~架构性差距~~ → 重新评估中
-- 🆕 **f_req_domain 特征探索** — v6 实验组：验证 domain 粒度特征是否能缩小 CVR gap
+- ✅ **PEPNet_v2（PLE）CVR 0.7878 已超过 v1c 0.768（+2.0pp）**——在 7 天无负采样数据集上
+- hash_fix（f_req_page hash_bucket）贡献了 +2.6pp CVR，是单一最大改进
+- 旧数据集上 0.742 与 v1c 0.768 的 2.6pp 差距已用"更多数据（7天无负采样）+ hash_fix"完全弥合
+- 当前剩余问题：PLE（0.7878）vs PEPNet_v2（0.782-0.786）架构对比、domain_lsp 是否能超越 PLE
+- ⚠️ **v6_baseline_4gpu（0.7589）因 T_max 未对齐，不能用于评估 batch 效应** — 已修正为 T_max=37000，需重跑
 
-## 后续计划
+## 后续计划（2026-06-06 更新）
 
-### v6：f_req_domain 特征探索 + f_req_page 编码修复
+### 核心方向
 
-基于 `f_req_domain` 的数据分析，同时修复 f_req_page 的 vocab_list 缺陷（仅覆盖 2/9 page）。两维度交叉 = 10 configs：
+**PLE × hash_fix（已确认含 hash_fix）** — v6_ple 的 config 实际使用 `hash_bucket_size: 100`，并非 vocab_list。PLE（0.7878）已是 PEPNet_v2_baseline_hbs（0.7822）+ hash_fix 之上的额外增益。
 
-**f_req_domain 用法（5 种）：**
+**domain_lsp on 2×A10** — level + site + pub_hours_fg 加入 domain group：
 
-| #   | variant             | f_req_page id | f_req_page group | f_req_domain id | f_req_domain group |
-| --- | ------------------- | :-----------: | :--------------: | :-------------: | :----------------: |
-| 1   | baseline            |      ✅       |        ✅        |       ❌        |         ❌         |
-| 2   | domain_id_only      |      ✅       |        ✅        |       ✅        |         ❌         |
-| 3   | domain_replace      |      ✅       |        ❌        |       ✅        |         ✅         |
-| 4   | domain_full_replace |      ❌       |        ❌        |       ✅        |         ✅         |
-| 5   | domain_parallel     |      ✅       |        ✅        |       ✅        |         ✅         |
+- 基于 PEPNet_v2 baseline_hbs 配置
+- 看是否能在 0.782 基础上进一步超越 PLE
 
-**f_req_page 编码（2 种）：**
+### 推迟/取消
 
-- 无后缀: `vocab_list`（原缺陷，只覆盖 2/9 page，OOV → 共享默认 embedding）
-- `_hbs`: `hash_bucket_size: 100`（所有 9 个 page 独立 embedding）
+- f_req_domain 系列补充实验（full_replace/parallel/id_only_hbs）— 无增益，不跑
+- T_max 验证实验（1gpu/4gpu）— **需重跑**，旧 4-GPU 的 T_max 未对齐（40000 vs 73242），LR 轨迹不可比较
 
-组合 = 9 configs（`v6_domain_full_replace` 无 f_req_page 故无 \_hbs 变体），位于 `v6/` 目录。
+### T_max 修正实验（新加）
+
+| Config           |  T_max | 说明                                    |
+| :--------------- | -----: | :-------------------------------------- |
+| v6_baseline_1gpu | 140000 | 对齐 2-GPU 的 cosine 衰减比例           |
+| v6_baseline_4gpu |  37000 | 对齐 2-GPU 的 cosine 衰减比例（需重跑） |
 
 ### 已排除的方向
 
@@ -391,18 +441,18 @@ CTR +0.16pp 说明 tower bias 确实被拉高了——搜索的 48% CTR 带动�
 
 ## 文件清单
 
-| 文件                                                    | 说明                                        |
-| ------------------------------------------------------- | ------------------------------------------- |
-| `tzrec/models/pepnet_v2.py`                             | PEPNet_v2 模型 (含 DCNv2, CDOT, Bias, LHUC) |
-| `tzrec/modules/cdot.py`                                 | CDOT 模块                                   |
-| `tzrec/modules/lhuc_net.py`                             | LHUC-EPNet + LHUC-PPNet 模块                |
-| `tzrec/modules/interaction.py`                          | CrossV2 (DCNv2) 模块                        |
-| `config/home_flow_2604_pepnet.config`                   | 基线配置                                    |
-| `config/v6/`                                            | v6 f_req_domain 实验组 (9 configs)          |
-| `config/home_flow_2604_pepnet_cdot_domain_dcnv2.config` | 🏆 最优配置                                 |
-| `experiment_summary.md`                                 | 实验小结                                    |
-| `feature_exploration_report.md`                         | 全量特征体系勘探 + pub_hours 深度分析       |
-| `site_mapping.md`                                       | site_e 编码↔站点名映射 (350个)              |
+| 文件                                                    | 说明                                          |
+| ------------------------------------------------------- | --------------------------------------------- |
+| `tzrec/models/pepnet_v2.py`                             | PEPNet_v2 模型 (含 DCNv2, CDOT, Bias, LHUC)   |
+| `tzrec/modules/cdot.py`                                 | CDOT 模块                                     |
+| `tzrec/modules/lhuc_net.py`                             | LHUC-EPNet + LHUC-PPNet 模块                  |
+| `tzrec/modules/interaction.py`                          | CrossV2 (DCNv2) 模块                          |
+| `config/home_flow_2604_pepnet.config`                   | 基线配置                                      |
+| `config/v6/`                                            | v6 实验组 (11 configs, 含 baseline_1gpu/4gpu) |
+| `config/home_flow_2604_pepnet_cdot_domain_dcnv2.config` | 🏆 最优配置                                   |
+| `experiment_summary.md`                                 | 实验小结                                      |
+| `feature_exploration_report.md`                         | 全量特征体系勘探 + pub_hours 深度分析         |
+| `site_mapping.md`                                       | site_e 编码↔站点名映射 (350个)                |
 
 ## 数据扩展 Config
 
