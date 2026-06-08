@@ -73,18 +73,39 @@ ______________________________________________________________________
 
 ## 2026-06-08: Wikilink/frontmatter 损坏事故 ⚠️
 
-- 多次 `edit` 操作导致 20 个文件 frontmatter `---` 丢失 + wikilink `\[` 转义
+- 多次 `edit` 操作导致 20 个文件 frontmatter `---` 丢失 + wikilink `[` 转义
 - Obsidian 中所有 wikilink 不能跳转, 诊断约 30min
 - 修复: 全局 Python 脚本恢复 frontmatter 定界符 + 去除转义
 - **教训**: 批量工具编辑 markdown 后必须验证 frontmatter/wikilink 完整性
-- **预防**: 编辑后 grep 检查 `\[` 或 `## date:` 模式
+- **预防**: 编辑后 grep 检查 `[` 或 `## date:` 模式
 - 详见 \[[40-errors/index#错误-5-wikilink-frontmatter-损坏|错误 5]\]
 
-## 待决 (设计矩阵确定性重跑中)
+## 🆕 2026-06-08: 三个关键结论被推翻 (确定性 vs 修复前) ⭐⭐
 
-- [ ] v6_baseline_hbs 真实值 (vs v6_ple_d 0.791069)
-- [ ] d=8 vs d=16 vs d=32 sweet spot 重评
-- [ ] lsp 在 PLE 下极性反转 (确定性重跑)
-- [ ] pub_hours_fg 替换 d 是否真退步
-- [ ] 公平 A/B (7d vs 7d, 排除数据规模因素)
+确定性重跑揭示修复前 5-run noise 0.73pp 系统性误导:
+
+1. **"PLE 打败 PEPNet" → 假象**: PLE baseline (0.786291) ≈ PEPNet baseline (0.786723), Δ仅 -0.04pp. PLE 本身不提升.
+1. **"lsp 有效 +0.30pp" → 假象**: PEPNet+lsp 实际 **-0.13pp**. baseline 跑在 eval 低谷, lsp 跑在正常点.
+1. **"d=8 sweet spot" → 暂不成立**: d=16 确定优于 d=8 (CVR +0.07pp, CTR +0.13pp), 须等 d=32.
+
+**唯一正增益**: PLE + f_req_domain in CDOT. 详见 \[[../20-experiments/v6-design-matrix#双指标综合分析|v6 设计矩阵综合分析]\].
+
+## 🆕 2026-06-08: CTR 综合分析结论 ⭐
+
+在线 score 公式 `pCTR * (1+pCVR)` 下, CTR 权重更高. 确定性结果:
+
+| 实验            |      CVR AUC |   CTR AUC    |    ΔCVR     |    ΔCTR     |
+| :-------------- | -----------: | :----------: | :---------: | :---------: |
+| PEPNet baseline |     0.786723 |   0.788628   |      —      |      —      |
+| PLE + d=8       |     0.791069 |   0.790610   |   +0.43pp   |   +0.20pp   |
+| **PLE + d=16**  | **0.791747** | **0.791909** | **+0.50pp** | **+0.33pp** |
+
+PLE+d 系列是唯一双正组合. PEPNet+dlsp CTR 最高但 CVR 最低, score 实际有害. **生产候选: PLE + d=16**.
+
+## 待决
+
+- [ ] d=32 确定性重跑 — 确认最优 dim
+- [ ] dpage, ph 确定性重跑 — 确认 feature 选择
+- [ ] domain_id_only, ple_lsp, ple_dlsp — 补全矩阵
+- [ ] 公平 A/B (7d vs 7d, 同归因窗口)
 - [ ] 统一归因窗口 (24h vs 30d)

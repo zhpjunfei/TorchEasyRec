@@ -93,13 +93,14 @@ export EVAL_SEED=0
 
 1. **修复验证通过**: 4 次完全确定性, Std=0pp (vs 修复前 0.73pp)
 1. **修复前有系统性低估偏差 -0.59pp**: 5-run mean 0.7852 → 真实值 0.791069
-1. **每次 eval 3.7s (确定性)**, 无需 N≥5
+1. **每个实验 1 次确定性 eval** (Std=0pp), 无需 N≥5
 1. **error-3-noise-undersample** 永久关闭
-1. 剩余 8 个实验需确定性重跑: baseline_hbs, ple, domain_lsp, domain_dlsp, d16, d32, dpage, ph
+1. 确定性重跑进度: **6/11 cells 完成** (baseline_hbs, lsp, dlsp, ple, ple_d, ple_d16), 5 pending (domain_id_only, ple_lsp, ple_dlsp, d32, dpage, ph)
 
 ## 下一步
 
 - ✅ P0 修复验证通过, Std=0pp
-- 8/8 设计矩阵确定性重跑 ([v6-design-matrix])
-- v7 变种确定性重跑 ([v7-ple-d-variants])
+- 6/11 cells 确定性重跑完成 (\[[v6-design-matrix]\])
+- CTR 综合分析的三个反转发现见 \[[v6-design-matrix#双指标综合分析|v6 设计矩阵综合分析]\]
+- v7 变种确定性重跑 (\[[v7-ple-d-variants]\])
 - 公平 A/B (7d vs 7d)
