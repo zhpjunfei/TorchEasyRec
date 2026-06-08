@@ -71,6 +71,15 @@ ______________________________________________________________________
 - **下一阶段**: 设计矩阵确定性重跑 (8/8 cells, 每实验 1 次)
 - 详见 \[[20-experiments/eval-pipeline-fix|修复记录]\]
 
+## 2026-06-08: Wikilink/frontmatter 损坏事故 ⚠️
+
+- 多次 `edit` 操作导致 20 个文件 frontmatter `---` 丢失 + wikilink `\[` 转义
+- Obsidian 中所有 wikilink 不能跳转, 诊断约 30min
+- 修复: 全局 Python 脚本恢复 frontmatter 定界符 + 去除转义
+- **教训**: 批量工具编辑 markdown 后必须验证 frontmatter/wikilink 完整性
+- **预防**: 编辑后 grep 检查 `\[` 或 `## date:` 模式
+- 详见 \[[40-errors/index#错误-5-wikilink-frontmatter-损坏|错误 5]\]
+
 ## 待决 (设计矩阵确定性重跑中)
 
 - [ ] v6_baseline_hbs 真实值 (vs v6_ple_d 0.791069)
