@@ -61,15 +61,20 @@ _logging.basicConfig(
 )
 
 # reproducibility
-_torch_manual_seed = _os.getenv("TORCH_MANUAL_SEED")
+_torch_manual_seed = _os.getenv("TORCH_MANUAL_SEED", "42")
 if _torch_manual_seed:
     _torch.manual_seed(int(_torch_manual_seed))
-_numpy_manual_seed = _os.getenv("NUMPY_MANUAL_SEED")
+_numpy_manual_seed = _os.getenv("NUMPY_MANUAL_SEED", "42")
 if _numpy_manual_seed:
     _np.random.seed(int(_numpy_manual_seed))
-_use_deterministic_algorithms = _os.getenv("USE_DETERMINISTIC_ALGORITHMS", "0") == "1"
+_use_deterministic_algorithms = _os.getenv("USE_DETERMINISTIC_ALGORITHMS", "1") == "1"
 if _use_deterministic_algorithms:
     _torch.use_deterministic_algorithms(True)
+    _torch.backends.cudnn.deterministic = True
+    _torch.backends.cudnn.benchmark = False
+    if hasattr(_torch.backends, "cuda") and hasattr(_torch.backends.cuda, "matmul"):
+        _torch.backends.cuda.matmul.allow_tf32 = False
+    _torch.backends.cudnn.allow_tf32 = False
 
 if not _os.environ.get("TZREC_SKIP_AUTO_IMPORT"):
     _load_class.auto_import()

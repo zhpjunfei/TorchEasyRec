@@ -813,6 +813,23 @@ def create_dataloader(
         else:
             dataset.launch_sampler_cluster(num_client_per_rank=num_workers)
 
+    def _seed_worker(worker_id: int) -> None:
+        worker_seed = int(os.environ.get("EVAL_SEED", "0")) or int(
+            os.environ.get("TORCH_MANUAL_SEED", "42")
+        )
+        if worker_seed > 0:
+            import random as _random
+
+            import numpy as _np
+            import torch as _torch
+
+            _random.seed(worker_seed + worker_id)
+            _np.random.seed(worker_seed + worker_id)
+            _torch.manual_seed(worker_seed + worker_id)
+
+    if num_workers > 0 and mode != Mode.TRAIN:
+        kwargs["worker_init_fn"] = _seed_worker
+
     dataloader = DataLoader(
         dataset=dataset,
         batch_size=None,

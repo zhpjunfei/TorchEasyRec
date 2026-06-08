@@ -1,0 +1,2219 @@
+SET odps.namespace.schema = true;
+
+CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v2_training_set
+(
+    event_unix_time                                                  BIGINT
+    ,`__item_id__`                                                   STRING
+    ,item_id                                                         STRING
+    ,scene                                                           STRING
+    ,`__mmb_id__`                                                    STRING
+    ,mmb_id                                                          STRING
+    ,request_id                                                      STRING
+    ,page                                                            STRING
+    ,day_h                                                           BIGINT
+    ,week_day                                                        BIGINT
+    ,is_click                                                        BIGINT
+    ,is_conversion                                                   BIGINT
+    ,`type`                                                          STRING
+    ,gender                                                          STRING
+    ,age_group                                                       STRING
+    ,reg_type                                                        STRING
+    ,mmb_level                                                       STRING
+    ,user_status                                                     STRING
+    ,mmb_status                                                      STRING
+    ,intergral                                                       DOUBLE
+    ,gold_coin                                                       DOUBLE
+    ,is_subscribe_discount                                           STRING
+    ,is_subscribe_savemoney                                          STRING
+    ,is_subscribe_clockin                                            STRING
+    ,receive_push                                                    STRING
+    ,is_not_disturb                                                  STRING
+    ,is_atpush                                                       STRING
+    ,province                                                        STRING
+    ,city                                                            STRING
+    ,area_code                                                       STRING
+    ,reg_time                                                        STRING
+    ,login_province                                                  STRING
+    ,login_city                                                      STRING
+    ,login_time                                                      STRING
+    ,sdk_version                                                     STRING
+    ,app_version                                                     STRING
+    ,os_type                                                         STRING
+    ,os_version                                                      STRING
+    ,dev_brand                                                       STRING
+    ,dev_model                                                       STRING
+    ,jpush                                                           STRING
+    ,first_campaign_name                                             STRING
+    ,first_utm_campaign                                              STRING
+    ,first_utm_source                                                STRING
+    ,first_ad_name                                                   STRING
+    ,first_site_name                                                 STRING
+    ,install_apps                                                    STRING
+    ,lifecycle_tags                                                  STRING
+    ,item_type                                                       STRING
+    ,cate                                                            STRING
+    ,cate_id_path                                                    STRING
+    ,copyright_end                                                   BIGINT
+    ,create_time                                                     BIGINT
+    ,current_price                                                   DOUBLE
+    ,keyword                                                         STRING
+    ,pub_time                                                        BIGINT
+    ,tags                                                            STRING
+    ,title                                                           STRING
+    ,related_goods_ids                                               STRING
+    ,brand                                                           STRING
+    ,core_entity                                                     STRING
+    ,dianpufensi                                                     STRING
+    ,dianpupingfen                                                   STRING
+    ,discount_intensity                                              STRING
+    ,discount_type                                                   STRING
+    ,first_cate_id                                                   BIGINT
+    ,second_cate_id                                                  BIGINT
+    ,third_cate_id                                                   BIGINT
+    ,gender_score                                                    BIGINT
+    ,level                                                           STRING
+    ,modifiers                                                       STRING
+    ,pinpaidengji                                                    STRING
+    ,price_tag                                                       STRING
+    ,promotion_channel                                               STRING
+    ,publish_user                                                    STRING
+    ,shop_id                                                         STRING
+    ,site                                                            STRING
+    ,spu_id                                                          STRING
+    ,sqk_id                                                          STRING
+    ,sub_title                                                       STRING
+    ,username                                                        STRING
+    ,title_vector                                                    ARRAY<DOUBLE>
+    ,sub_title_vector                                                ARRAY<DOUBLE>
+    ,gender__ratio_click_exposure_15d                                DOUBLE
+    ,gender__ratio_conversion_click_15d                              DOUBLE
+    ,gender__ratio_favorite_click_15d                                DOUBLE
+    ,gender__kv_ratio_brand_click_exposure_15d                       MAP<STRING,FLOAT>
+    ,gender__kv_ratio_cate_id_path_click_exposure_15d                MAP<STRING,FLOAT>
+    ,gender__kv_ratio_core_entity_click_exposure_15d                 MAP<STRING,FLOAT>
+    ,gender__kv_ratio_first_cate_id_click_exposure_15d               MAP<STRING,FLOAT>
+    ,gender__kv_ratio_second_cate_id_click_exposure_15d              MAP<STRING,FLOAT>
+    ,gender__kv_ratio_third_cate_id_click_exposure_15d               MAP<STRING,FLOAT>
+    ,gender__kv_ratio_price_tag_click_exposure_15d                   MAP<STRING,FLOAT>
+    ,gender__kv_ratio_promotion_channel_click_exposure_15d           MAP<STRING,FLOAT>
+    ,gender__kv_ratio_publish_user_click_exposure_15d                MAP<STRING,FLOAT>
+    ,gender__kv_ratio_site_click_exposure_15d                        MAP<STRING,FLOAT>
+    ,gender__kv_ratio_discount_intensity_click_exposure_15d          MAP<STRING,FLOAT>
+    ,gender__kv_ratio_dianpupingfen_click_exposure_15d               MAP<STRING,FLOAT>
+    ,gender__kv_ratio_pinpaidengji_click_exposure_15d                MAP<STRING,FLOAT>
+    ,gender__kv_ratio_dianpufensi_click_exposure_15d                 MAP<STRING,FLOAT>
+    ,gender__kv_ratio_item_id_click_exposure_15d                     MAP<STRING,FLOAT>
+    ,gender__kv_ratio_related_goods_ids_click_exposure_15d           MAP<STRING,FLOAT>
+    ,gender__kv_ratio_spu_id_click_exposure_15d                      MAP<STRING,FLOAT>
+    ,gender__kv_ratio_username_click_exposure_15d                    MAP<STRING,FLOAT>
+    ,gender__kv_ratio_brand_conversion_exposure_15d                  MAP<STRING,FLOAT>
+    ,gender__kv_ratio_cate_id_path_conversion_exposure_15d           MAP<STRING,FLOAT>
+    ,gender__kv_ratio_core_entity_conversion_exposure_15d            MAP<STRING,FLOAT>
+    ,gender__kv_ratio_first_cate_id_conversion_exposure_15d          MAP<STRING,FLOAT>
+    ,gender__kv_ratio_second_cate_id_conversion_exposure_15d         MAP<STRING,FLOAT>
+    ,gender__kv_ratio_third_cate_id_conversion_exposure_15d          MAP<STRING,FLOAT>
+    ,gender__kv_ratio_price_tag_conversion_exposure_15d              MAP<STRING,FLOAT>
+    ,gender__kv_ratio_promotion_channel_conversion_exposure_15d      MAP<STRING,FLOAT>
+    ,gender__kv_ratio_publish_user_conversion_exposure_15d           MAP<STRING,FLOAT>
+    ,gender__kv_ratio_site_conversion_exposure_15d                   MAP<STRING,FLOAT>
+    ,gender__kv_ratio_discount_intensity_conversion_exposure_15d     MAP<STRING,FLOAT>
+    ,gender__kv_ratio_dianpupingfen_conversion_exposure_15d          MAP<STRING,FLOAT>
+    ,gender__kv_ratio_pinpaidengji_conversion_exposure_15d           MAP<STRING,FLOAT>
+    ,gender__kv_ratio_dianpufensi_conversion_exposure_15d            MAP<STRING,FLOAT>
+    ,gender__kv_ratio_item_id_conversion_exposure_15d                MAP<STRING,FLOAT>
+    ,gender__kv_ratio_related_goods_ids_conversion_exposure_15d      MAP<STRING,FLOAT>
+    ,gender__kv_ratio_spu_id_conversion_exposure_15d                 MAP<STRING,FLOAT>
+    ,gender__kv_ratio_username_conversion_exposure_15d               MAP<STRING,FLOAT>
+    ,gender__kv_ratio_brand_favorite_exposure_15d                    MAP<STRING,FLOAT>
+    ,gender__kv_ratio_cate_id_path_favorite_exposure_15d             MAP<STRING,FLOAT>
+    ,gender__kv_ratio_core_entity_favorite_exposure_15d              MAP<STRING,FLOAT>
+    ,gender__kv_ratio_first_cate_id_favorite_exposure_15d            MAP<STRING,FLOAT>
+    ,gender__kv_ratio_second_cate_id_favorite_exposure_15d           MAP<STRING,FLOAT>
+    ,gender__kv_ratio_third_cate_id_favorite_exposure_15d            MAP<STRING,FLOAT>
+    ,gender__kv_ratio_price_tag_favorite_exposure_15d                MAP<STRING,FLOAT>
+    ,gender__kv_ratio_promotion_channel_favorite_exposure_15d        MAP<STRING,FLOAT>
+    ,gender__kv_ratio_publish_user_favorite_exposure_15d             MAP<STRING,FLOAT>
+    ,gender__kv_ratio_site_favorite_exposure_15d                     MAP<STRING,FLOAT>
+    ,gender__kv_ratio_discount_intensity_favorite_exposure_15d       MAP<STRING,FLOAT>
+    ,gender__kv_ratio_dianpupingfen_favorite_exposure_15d            MAP<STRING,FLOAT>
+    ,gender__kv_ratio_pinpaidengji_favorite_exposure_15d             MAP<STRING,FLOAT>
+    ,gender__kv_ratio_dianpufensi_favorite_exposure_15d              MAP<STRING,FLOAT>
+    ,gender__kv_ratio_item_id_favorite_exposure_15d                  MAP<STRING,FLOAT>
+    ,gender__kv_ratio_related_goods_ids_favorite_exposure_15d        MAP<STRING,FLOAT>
+    ,gender__kv_ratio_spu_id_favorite_exposure_15d                   MAP<STRING,FLOAT>
+    ,gender__kv_ratio_username_favorite_exposure_15d                 MAP<STRING,FLOAT>
+    ,age_group__ratio_click_exposure_15d                             DOUBLE
+    ,age_group__ratio_conversion_click_15d                           DOUBLE
+    ,age_group__ratio_favorite_click_15d                             DOUBLE
+    ,age_group__kv_ratio_item_id_click_exposure_15d                  MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_cate_id_path_click_exposure_15d             MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_related_goods_ids_click_exposure_15d        MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_brand_click_exposure_15d                    MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_core_entity_click_exposure_15d              MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_first_cate_id_click_exposure_15d            MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_second_cate_id_click_exposure_15d           MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_third_cate_id_click_exposure_15d            MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_price_tag_click_exposure_15d                MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_promotion_channel_click_exposure_15d        MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_publish_user_click_exposure_15d             MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_site_click_exposure_15d                     MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_spu_id_click_exposure_15d                   MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_discount_intensity_click_exposure_15d       MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_dianpupingfen_click_exposure_15d            MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_pinpaidengji_click_exposure_15d             MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_dianpufensi_click_exposure_15d              MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_username_click_exposure_15d                 MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_item_id_conversion_exposure_15d             MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_cate_id_path_conversion_exposure_15d        MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_related_goods_ids_conversion_exposure_15d   MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_brand_conversion_exposure_15d               MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_core_entity_conversion_exposure_15d         MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_first_cate_id_conversion_exposure_15d       MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_second_cate_id_conversion_exposure_15d      MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_third_cate_id_conversion_exposure_15d       MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_price_tag_conversion_exposure_15d           MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_promotion_channel_conversion_exposure_15d   MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_publish_user_conversion_exposure_15d        MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_site_conversion_exposure_15d                MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_spu_id_conversion_exposure_15d              MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_discount_intensity_conversion_exposure_15d  MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_dianpupingfen_conversion_exposure_15d       MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_pinpaidengji_conversion_exposure_15d        MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_dianpufensi_conversion_exposure_15d         MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_username_conversion_exposure_15d            MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_item_id_favorite_exposure_15d               MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_cate_id_path_favorite_exposure_15d          MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_related_goods_ids_favorite_exposure_15d     MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_brand_favorite_exposure_15d                 MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_core_entity_favorite_exposure_15d           MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_first_cate_id_favorite_exposure_15d         MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_second_cate_id_favorite_exposure_15d        MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_third_cate_id_favorite_exposure_15d         MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_price_tag_favorite_exposure_15d             MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_promotion_channel_favorite_exposure_15d     MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_publish_user_favorite_exposure_15d          MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_site_favorite_exposure_15d                  MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_spu_id_favorite_exposure_15d                MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_discount_intensity_favorite_exposure_15d    MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_dianpupingfen_favorite_exposure_15d         MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_pinpaidengji_favorite_exposure_15d          MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_dianpufensi_favorite_exposure_15d           MAP<STRING,FLOAT>
+    ,age_group__kv_ratio_username_favorite_exposure_15d              MAP<STRING,FLOAT>
+    ,login_city__ratio_click_exposure_15d                            DOUBLE
+    ,login_city__ratio_conversion_click_15d                          DOUBLE
+    ,login_city__ratio_favorite_click_15d                            DOUBLE
+    ,login_city__kv_ratio_item_id_click_exposure_15d                 MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_cate_id_path_click_exposure_15d            MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_related_goods_ids_click_exposure_15d       MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_brand_click_exposure_15d                   MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_core_entity_click_exposure_15d             MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_first_cate_id_click_exposure_15d           MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_second_cate_id_click_exposure_15d          MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_third_cate_id_click_exposure_15d           MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_price_tag_click_exposure_15d               MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_promotion_channel_click_exposure_15d       MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_publish_user_click_exposure_15d            MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_site_click_exposure_15d                    MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_spu_id_click_exposure_15d                  MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_discount_intensity_click_exposure_15d      MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_dianpupingfen_click_exposure_15d           MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_pinpaidengji_click_exposure_15d            MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_dianpufensi_click_exposure_15d             MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_username_click_exposure_15d                MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_item_id_conversion_exposure_15d            MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_cate_id_path_conversion_exposure_15d       MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_related_goods_ids_conversion_exposure_15d  MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_brand_conversion_exposure_15d              MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_core_entity_conversion_exposure_15d        MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_first_cate_id_conversion_exposure_15d      MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_second_cate_id_conversion_exposure_15d     MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_third_cate_id_conversion_exposure_15d      MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_price_tag_conversion_exposure_15d          MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_promotion_channel_conversion_exposure_15d  MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_publish_user_conversion_exposure_15d       MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_site_conversion_exposure_15d               MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_spu_id_conversion_exposure_15d             MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_discount_intensity_conversion_exposure_15d MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_dianpupingfen_conversion_exposure_15d      MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_pinpaidengji_conversion_exposure_15d       MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_dianpufensi_conversion_exposure_15d        MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_username_conversion_exposure_15d           MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_item_id_favorite_exposure_15d              MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_cate_id_path_favorite_exposure_15d         MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_related_goods_ids_favorite_exposure_15d    MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_brand_favorite_exposure_15d                MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_core_entity_favorite_exposure_15d          MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_first_cate_id_favorite_exposure_15d        MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_second_cate_id_favorite_exposure_15d       MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_third_cate_id_favorite_exposure_15d        MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_price_tag_favorite_exposure_15d            MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_promotion_channel_favorite_exposure_15d    MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_publish_user_favorite_exposure_15d         MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_site_favorite_exposure_15d                 MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_spu_id_favorite_exposure_15d               MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_discount_intensity_favorite_exposure_15d   MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_dianpupingfen_favorite_exposure_15d        MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_pinpaidengji_favorite_exposure_15d         MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_dianpufensi_favorite_exposure_15d          MAP<STRING,FLOAT>
+    ,login_city__kv_ratio_username_favorite_exposure_15d             MAP<STRING,FLOAT>
+    ,dev_brand__ratio_click_exposure_15d                             DOUBLE
+    ,dev_brand__ratio_conversion_exposure_15d                        DOUBLE
+    ,dev_brand__ratio_favorite_exposure_15d                          DOUBLE
+    ,dev_brand__kv_ratio_item_id_click_exposure_15d                  MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_cate_id_path_click_exposure_15d             MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_related_goods_ids_click_exposure_15d        MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_brand_click_exposure_15d                    MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_core_entity_click_exposure_15d              MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_first_cate_id_click_exposure_15d            MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_second_cate_id_click_exposure_15d           MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_third_cate_id_click_exposure_15d            MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_price_tag_click_exposure_15d                MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_promotion_channel_click_exposure_15d        MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_publish_user_click_exposure_15d             MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_site_click_exposure_15d                     MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_spu_id_click_exposure_15d                   MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_discount_intensity_click_exposure_15d       MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_dianpupingfen_click_exposure_15d            MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_pinpaidengji_click_exposure_15d             MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_dianpufensi_click_exposure_15d              MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_item_type_click_exposure_15d                MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_username_click_exposure_15d                 MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_item_id_conversion_exposure_15d             MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_cate_id_path_conversion_exposure_15d        MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_related_goods_ids_conversion_exposure_15d   MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_brand_conversion_exposure_15d               MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_core_entity_conversion_exposure_15d         MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_first_cate_id_conversion_exposure_15d       MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_second_cate_id_conversion_exposure_15d      MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_third_cate_id_conversion_exposure_15d       MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_price_tag_conversion_exposure_15d           MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_promotion_channel_conversion_exposure_15d   MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_publish_user_conversion_exposure_15d        MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_site_conversion_exposure_15d                MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_spu_id_conversion_exposure_15d              MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_discount_intensity_conversion_exposure_15d  MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_dianpupingfen_conversion_exposure_15d       MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_pinpaidengji_conversion_exposure_15d        MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_dianpufensi_conversion_exposure_15d         MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_item_type_conversion_exposure_15d           MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_username_conversion_exposure_15d            MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_item_id_favorite_exposure_15d               MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_cate_id_path_favorite_exposure_15d          MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_related_goods_ids_favorite_exposure_15d     MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_brand_favorite_exposure_15d                 MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_core_entity_favorite_exposure_15d           MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_first_cate_id_favorite_exposure_15d         MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_second_cate_id_favorite_exposure_15d        MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_third_cate_id_favorite_exposure_15d         MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_price_tag_favorite_exposure_15d             MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_promotion_channel_favorite_exposure_15d     MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_publish_user_favorite_exposure_15d          MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_site_favorite_exposure_15d                  MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_spu_id_favorite_exposure_15d                MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_discount_intensity_favorite_exposure_15d    MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_dianpupingfen_favorite_exposure_15d         MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_pinpaidengji_favorite_exposure_15d          MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_dianpufensi_favorite_exposure_15d           MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_item_type_favorite_exposure_15d             MAP<STRING,FLOAT>
+    ,dev_brand__kv_ratio_username_favorite_exposure_15d              MAP<STRING,FLOAT>
+    ,user__cnt_favorite_15d                                          BIGINT
+    ,user__cnt_conversion_15d                                        BIGINT
+    ,user__cnt_click_15d                                             BIGINT
+    ,user__num_favorite_avg_current_price_15d                        DOUBLE
+    ,user__num_conversion_avg_current_price_15d                      DOUBLE
+    ,user__num_click_avg_current_price_15d                           DOUBLE
+    ,user__kv_cate_id_path_click_15d                                 MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_click_15d                            MAP<STRING,FLOAT>
+    ,user__kv_brand_click_15d                                        MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_click_15d                                MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_click_15d                               MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_click_15d                                MAP<STRING,FLOAT>
+    ,user__kv_price_tag_click_15d                                    MAP<STRING,FLOAT>
+    ,user__kv_promotion_channel_click_15d                            MAP<STRING,FLOAT>
+    ,user__kv_publish_user_click_15d                                 MAP<STRING,FLOAT>
+    ,user__kv_site_click_15d                                         MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_click_15d                           MAP<STRING,FLOAT>
+    ,user__kv_dianpupingfen_click_15d                                MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_click_15d                                 MAP<STRING,FLOAT>
+    ,user__kv_dianpufensi_click_15d                                  MAP<STRING,FLOAT>
+    ,user__kv_gender_score_click_15d                                 MAP<STRING,FLOAT>
+    ,user__kv_item_type_click_15d                                    MAP<STRING,FLOAT>
+    ,user__kv_spu_id_click_15d                                       MAP<STRING,FLOAT>
+    ,user__kv_item_id_click_15d                                      MAP<STRING,FLOAT>
+    ,user__kv_core_entity_click_15d                                  MAP<STRING,FLOAT>
+    ,user__kv_username_click_15d                                     MAP<STRING,FLOAT>
+    ,user__kv_cate_id_path_conversion_15d                            MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_conversion_15d                       MAP<STRING,FLOAT>
+    ,user__kv_brand_conversion_15d                                   MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_conversion_15d                           MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_conversion_15d                          MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_conversion_15d                           MAP<STRING,FLOAT>
+    ,user__kv_price_tag_conversion_15d                               MAP<STRING,FLOAT>
+    ,user__kv_promotion_channel_conversion_15d                       MAP<STRING,FLOAT>
+    ,user__kv_publish_user_conversion_15d                            MAP<STRING,FLOAT>
+    ,user__kv_site_conversion_15d                                    MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_conversion_15d                      MAP<STRING,FLOAT>
+    ,user__kv_dianpupingfen_conversion_15d                           MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_conversion_15d                            MAP<STRING,FLOAT>
+    ,user__kv_dianpufensi_conversion_15d                             MAP<STRING,FLOAT>
+    ,user__kv_gender_score_conversion_15d                            MAP<STRING,FLOAT>
+    ,user__kv_item_type_conversion_15d                               MAP<STRING,FLOAT>
+    ,user__kv_spu_id_conversion_15d                                  MAP<STRING,FLOAT>
+    ,user__kv_item_id_conversion_15d                                 MAP<STRING,FLOAT>
+    ,user__kv_core_entity_conversion_15d                             MAP<STRING,FLOAT>
+    ,user__kv_username_conversion_15d                                MAP<STRING,FLOAT>
+    ,user__kv_cate_id_path_favorite_15d                              MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_favorite_15d                         MAP<STRING,FLOAT>
+    ,user__kv_brand_favorite_15d                                     MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_favorite_15d                             MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_favorite_15d                            MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_favorite_15d                             MAP<STRING,FLOAT>
+    ,user__kv_price_tag_favorite_15d                                 MAP<STRING,FLOAT>
+    ,user__kv_promotion_channel_favorite_15d                         MAP<STRING,FLOAT>
+    ,user__kv_publish_user_favorite_15d                              MAP<STRING,FLOAT>
+    ,user__kv_site_favorite_15d                                      MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_favorite_15d                        MAP<STRING,FLOAT>
+    ,user__kv_dianpupingfen_favorite_15d                             MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_favorite_15d                              MAP<STRING,FLOAT>
+    ,user__kv_dianpufensi_favorite_15d                               MAP<STRING,FLOAT>
+    ,user__kv_gender_score_favorite_15d                              MAP<STRING,FLOAT>
+    ,user__kv_item_type_favorite_15d                                 MAP<STRING,FLOAT>
+    ,user__kv_spu_id_favorite_15d                                    MAP<STRING,FLOAT>
+    ,user__kv_item_id_favorite_15d                                   MAP<STRING,FLOAT>
+    ,user__kv_core_entity_favorite_15d                               MAP<STRING,FLOAT>
+    ,user__kv_username_favorite_15d                                  MAP<STRING,FLOAT>
+    ,first_cate_id__ratio_click_exposure_15d                         DOUBLE
+    ,first_cate_id__ratio_conversion_exposure_15d                    DOUBLE
+    ,first_cate_id__ratio_favorite_click_15d                         DOUBLE
+    ,first_cate_id__ratio_click_exposure_3d                          DOUBLE
+    ,first_cate_id__ratio_conversion_exposure_3d                     DOUBLE
+    ,first_cate_id__ratio_favorite_click_3d                          DOUBLE
+    ,first_cate_id__ratio_click_exposure_1d                          DOUBLE
+    ,first_cate_id__ratio_conversion_exposure_1d                     DOUBLE
+    ,first_cate_id__ratio_favorite_click_1d                          DOUBLE
+    ,second_cate_id__ratio_click_exposure_15d                        DOUBLE
+    ,second_cate_id__ratio_conversion_exposure_15d                   DOUBLE
+    ,second_cate_id__ratio_favorite_click_15d                        DOUBLE
+    ,second_cate_id__ratio_click_exposure_3d                         DOUBLE
+    ,second_cate_id__ratio_conversion_exposure_3d                    DOUBLE
+    ,second_cate_id__ratio_favorite_click_3d                         DOUBLE
+    ,second_cate_id__ratio_click_exposure_1d                         DOUBLE
+    ,second_cate_id__ratio_conversion_exposure_1d                    DOUBLE
+    ,second_cate_id__ratio_favorite_click_1d                         DOUBLE
+    ,cate_id_path__ratio_click_exposure_15d                          DOUBLE
+    ,cate_id_path__ratio_conversion_exposure_15d                     DOUBLE
+    ,cate_id_path__ratio_favorite_click_15d                          DOUBLE
+    ,cate_id_path__ratio_click_exposure_3d                           DOUBLE
+    ,cate_id_path__ratio_conversion_exposure_3d                      DOUBLE
+    ,cate_id_path__ratio_favorite_click_3d                           DOUBLE
+    ,cate_id_path__ratio_click_exposure_1d                           DOUBLE
+    ,cate_id_path__ratio_conversion_exposure_1d                      DOUBLE
+    ,cate_id_path__ratio_favorite_click_1d                           DOUBLE
+    ,brand__ratio_click_exposure_15d                                 DOUBLE
+    ,brand__ratio_conversion_exposure_15d                            DOUBLE
+    ,brand__ratio_favorite_click_15d                                 DOUBLE
+    ,brand__ratio_click_exposure_3d                                  DOUBLE
+    ,brand__ratio_conversion_exposure_3d                             DOUBLE
+    ,brand__ratio_favorite_click_3d                                  DOUBLE
+    ,brand__ratio_click_exposure_1d                                  DOUBLE
+    ,brand__ratio_conversion_exposure_1d                             DOUBLE
+    ,brand__ratio_favorite_click_1d                                  DOUBLE
+    ,site__ratio_click_exposure_15d                                  DOUBLE
+    ,site__ratio_conversion_exposure_15d                             DOUBLE
+    ,site__ratio_favorite_click_15d                                  DOUBLE
+    ,site__ratio_click_exposure_3d                                   DOUBLE
+    ,site__ratio_conversion_exposure_3d                              DOUBLE
+    ,site__ratio_favorite_click_3d                                   DOUBLE
+    ,site__ratio_click_exposure_1d                                   DOUBLE
+    ,site__ratio_conversion_exposure_1d                              DOUBLE
+    ,site__ratio_favorite_click_1d                                   DOUBLE
+    ,core_entity__ratio_click_exposure_15d                           DOUBLE
+    ,core_entity__ratio_conversion_exposure_15d                      DOUBLE
+    ,core_entity__ratio_favorite_click_15d                           DOUBLE
+    ,core_entity__ratio_click_exposure_3d                            DOUBLE
+    ,core_entity__ratio_conversion_exposure_3d                       DOUBLE
+    ,core_entity__ratio_favorite_click_3d                            DOUBLE
+    ,core_entity__ratio_click_exposure_1d                            DOUBLE
+    ,core_entity__ratio_conversion_exposure_1d                       DOUBLE
+    ,core_entity__ratio_favorite_click_1d                            DOUBLE
+    ,price_tag__ratio_click_exposure_15d                             DOUBLE
+    ,price_tag__ratio_conversion_exposure_15d                        DOUBLE
+    ,price_tag__ratio_favorite_click_15d                             DOUBLE
+    ,price_tag__ratio_click_exposure_3d                              DOUBLE
+    ,price_tag__ratio_conversion_exposure_3d                         DOUBLE
+    ,price_tag__ratio_favorite_click_3d                              DOUBLE
+    ,price_tag__ratio_click_exposure_1d                              DOUBLE
+    ,price_tag__ratio_conversion_exposure_1d                         DOUBLE
+    ,price_tag__ratio_favorite_click_1d                              DOUBLE
+    ,promotion_channel__ratio_click_exposure_15d                     DOUBLE
+    ,promotion_channel__ratio_conversion_exposure_15d                DOUBLE
+    ,promotion_channel__ratio_favorite_click_15d                     DOUBLE
+    ,promotion_channel__ratio_click_exposure_3d                      DOUBLE
+    ,promotion_channel__ratio_conversion_exposure_3d                 DOUBLE
+    ,promotion_channel__ratio_favorite_click_3d                      DOUBLE
+    ,promotion_channel__ratio_click_exposure_1d                      DOUBLE
+    ,promotion_channel__ratio_conversion_exposure_1d                 DOUBLE
+    ,promotion_channel__ratio_favorite_click_1d                      DOUBLE
+    ,discount_intensity__ratio_click_exposure_15d                    DOUBLE
+    ,discount_intensity__ratio_conversion_exposure_15d               DOUBLE
+    ,discount_intensity__ratio_favorite_click_15d                    DOUBLE
+    ,discount_intensity__ratio_click_exposure_3d                     DOUBLE
+    ,discount_intensity__ratio_conversion_exposure_3d                DOUBLE
+    ,discount_intensity__ratio_favorite_click_3d                     DOUBLE
+    ,discount_intensity__ratio_click_exposure_1d                     DOUBLE
+    ,discount_intensity__ratio_conversion_exposure_1d                DOUBLE
+    ,discount_intensity__ratio_favorite_click_1d                     DOUBLE
+    ,dianpupingfen__ratio_click_exposure_15d                         DOUBLE
+    ,dianpupingfen__ratio_conversion_exposure_15d                    DOUBLE
+    ,dianpupingfen__ratio_favorite_click_15d                         DOUBLE
+    ,dianpupingfen__ratio_click_exposure_3d                          DOUBLE
+    ,dianpupingfen__ratio_conversion_exposure_3d                     DOUBLE
+    ,dianpupingfen__ratio_favorite_click_3d                          DOUBLE
+    ,dianpupingfen__ratio_click_exposure_1d                          DOUBLE
+    ,dianpupingfen__ratio_conversion_exposure_1d                     DOUBLE
+    ,dianpupingfen__ratio_favorite_click_1d                          DOUBLE
+    ,pinpaidengji__ratio_click_exposure_15d                          DOUBLE
+    ,pinpaidengji__ratio_conversion_exposure_15d                     DOUBLE
+    ,pinpaidengji__ratio_favorite_click_15d                          DOUBLE
+    ,pinpaidengji__ratio_click_exposure_3d                           DOUBLE
+    ,pinpaidengji__ratio_conversion_exposure_3d                      DOUBLE
+    ,pinpaidengji__ratio_favorite_click_3d                           DOUBLE
+    ,pinpaidengji__ratio_click_exposure_1d                           DOUBLE
+    ,pinpaidengji__ratio_conversion_exposure_1d                      DOUBLE
+    ,pinpaidengji__ratio_favorite_click_1d                           DOUBLE
+    ,spu_id__ratio_click_exposure_15d                                DOUBLE
+    ,spu_id__ratio_conversion_exposure_15d                           DOUBLE
+    ,spu_id__ratio_favorite_click_15d                                DOUBLE
+    ,spu_id__ratio_click_exposure_3d                                 DOUBLE
+    ,spu_id__ratio_conversion_exposure_3d                            DOUBLE
+    ,spu_id__ratio_favorite_click_3d                                 DOUBLE
+    ,spu_id__ratio_click_exposure_1d                                 DOUBLE
+    ,spu_id__ratio_conversion_exposure_1d                            DOUBLE
+    ,spu_id__ratio_favorite_click_1d                                 DOUBLE
+    ,publish_user__ratio_click_exposure_15d                          DOUBLE
+    ,publish_user__ratio_conversion_exposure_15d                     DOUBLE
+    ,publish_user__ratio_favorite_click_15d                          DOUBLE
+    ,publish_user__ratio_click_exposure_3d                           DOUBLE
+    ,publish_user__ratio_conversion_exposure_3d                      DOUBLE
+    ,publish_user__ratio_favorite_click_3d                           DOUBLE
+    ,publish_user__ratio_click_exposure_1d                           DOUBLE
+    ,publish_user__ratio_conversion_exposure_1d                      DOUBLE
+    ,publish_user__ratio_favorite_click_1d                           DOUBLE
+    ,username__ratio_click_exposure_15d                              DOUBLE
+    ,username__ratio_conversion_exposure_15d                         DOUBLE
+    ,username__ratio_favorite_click_15d                              DOUBLE
+    ,username__ratio_click_exposure_3d                               DOUBLE
+    ,username__ratio_conversion_exposure_3d                          DOUBLE
+    ,username__ratio_favorite_click_3d                               DOUBLE
+    ,username__ratio_click_exposure_1d                               DOUBLE
+    ,username__ratio_conversion_exposure_1d                          DOUBLE
+    ,username__ratio_favorite_click_1d                               DOUBLE
+    ,item__cnt_favorite_15d                                          BIGINT
+    ,item__cnt_conversion_15d                                        BIGINT
+    ,item__cnt_click_15d                                             BIGINT
+    ,item__ratio_favorite_click_15d                                  DOUBLE
+    ,item__ratio_conversion_click_15d                                DOUBLE
+    ,item__cnt_favorite_3d                                           BIGINT
+    ,item__cnt_conversion_3d                                         BIGINT
+    ,item__cnt_click_3d                                              BIGINT
+    ,item__ratio_favorite_click_3d                                   DOUBLE
+    ,item__ratio_conversion_click_3d                                 DOUBLE
+    ,item__cnt_favorite_1d                                           BIGINT
+    ,item__cnt_conversion_1d                                         BIGINT
+    ,item__cnt_click_1d                                              BIGINT
+    ,item__ratio_favorite_click_1d                                   DOUBLE
+    ,item__ratio_conversion_click_1d                                 DOUBLE
+    ,item__cnt_click_rt1h                                            BIGINT
+    ,item__cnt_conversion_rt1h                                       BIGINT
+    ,item__cnt_favorite_rt1h                                         BIGINT
+    ,item__cnt_click_rt3h                                            BIGINT
+    ,item__cnt_conversion_rt3h                                       BIGINT
+    ,item__cnt_favorite_rt3h                                         BIGINT
+    ,item__cnt_click_rt12h                                           BIGINT
+    ,item__cnt_conversion_rt12h                                      BIGINT
+    ,item__cnt_favorite_rt12h                                        BIGINT
+    ,item__cnt_click_rt24h                                           BIGINT
+    ,item__cnt_conversion_rt24h                                      BIGINT
+    ,item__cnt_favorite_rt24h                                        BIGINT
+    ,user__kv_item_id_click_rt1h                                     STRING
+    ,user__kv_cate_id_path_click_rt1h                                STRING
+    ,user__kv_related_goods_ids_click_rt1h                           STRING
+    ,user__kv_brand_click_rt1h                                       STRING
+    ,user__kv_core_entity_click_rt1h                                 STRING
+    ,user__kv_first_cate_id_click_rt1h                               STRING
+    ,user__kv_second_cate_id_click_rt1h                              STRING
+    ,user__kv_third_cate_id_click_rt1h                               STRING
+    ,user__kv_price_tag_click_rt1h                                   STRING
+    ,user__kv_promotion_channel_click_rt1h                           STRING
+    ,user__kv_publish_user_click_rt1h                                STRING
+    ,user__kv_site_click_rt1h                                        STRING
+    ,user__kv_spu_id_click_rt1h                                      STRING
+    ,user__kv_discount_intensity_click_rt1h                          STRING
+    ,user__kv_dianpupingfen_click_rt1h                               STRING
+    ,user__kv_pinpaidengji_click_rt1h                                STRING
+    ,user__kv_dianpufensi_click_rt1h                                 STRING
+    ,user__kv_item_type_click_rt1h                                   STRING
+    ,user__kv_username_click_rt1h                                    STRING
+    ,user__kv_item_id_conversion_rt1h                                STRING
+    ,user__kv_cate_id_path_conversion_rt1h                           STRING
+    ,user__kv_related_goods_ids_conversion_rt1h                      STRING
+    ,user__kv_brand_conversion_rt1h                                  STRING
+    ,user__kv_core_entity_conversion_rt1h                            STRING
+    ,user__kv_first_cate_id_conversion_rt1h                          STRING
+    ,user__kv_second_cate_id_conversion_rt1h                         STRING
+    ,user__kv_third_cate_id_conversion_rt1h                          STRING
+    ,user__kv_price_tag_conversion_rt1h                              STRING
+    ,user__kv_promotion_channel_conversion_rt1h                      STRING
+    ,user__kv_publish_user_conversion_rt1h                           STRING
+    ,user__kv_site_conversion_rt1h                                   STRING
+    ,user__kv_spu_id_conversion_rt1h                                 STRING
+    ,user__kv_discount_intensity_conversion_rt1h                     STRING
+    ,user__kv_dianpupingfen_conversion_rt1h                          STRING
+    ,user__kv_pinpaidengji_conversion_rt1h                           STRING
+    ,user__kv_dianpufensi_conversion_rt1h                            STRING
+    ,user__kv_item_type_conversion_rt1h                              STRING
+    ,user__kv_username_conversion_rt1h                               STRING
+    ,user__kv_item_id_favorite_rt1h                                  STRING
+    ,user__kv_cate_id_path_favorite_rt1h                             STRING
+    ,user__kv_related_goods_ids_favorite_rt1h                        STRING
+    ,user__kv_brand_favorite_rt1h                                    STRING
+    ,user__kv_core_entity_favorite_rt1h                              STRING
+    ,user__kv_first_cate_id_favorite_rt1h                            STRING
+    ,user__kv_second_cate_id_favorite_rt1h                           STRING
+    ,user__kv_third_cate_id_favorite_rt1h                            STRING
+    ,user__kv_price_tag_favorite_rt1h                                STRING
+    ,user__kv_promotion_channel_favorite_rt1h                        STRING
+    ,user__kv_publish_user_favorite_rt1h                             STRING
+    ,user__kv_site_favorite_rt1h                                     STRING
+    ,user__kv_spu_id_favorite_rt1h                                   STRING
+    ,user__kv_discount_intensity_favorite_rt1h                       STRING
+    ,user__kv_dianpupingfen_favorite_rt1h                            STRING
+    ,user__kv_pinpaidengji_favorite_rt1h                             STRING
+    ,user__kv_dianpufensi_favorite_rt1h                              STRING
+    ,user__kv_item_type_favorite_rt1h                                STRING
+    ,user__kv_username_favorite_rt1h                                 STRING
+    ,user__kv_item_id_click_rt3h                                     STRING
+    ,user__kv_cate_id_path_click_rt3h                                STRING
+    ,user__kv_related_goods_ids_click_rt3h                           STRING
+    ,user__kv_brand_click_rt3h                                       STRING
+    ,user__kv_core_entity_click_rt3h                                 STRING
+    ,user__kv_first_cate_id_click_rt3h                               STRING
+    ,user__kv_second_cate_id_click_rt3h                              STRING
+    ,user__kv_third_cate_id_click_rt3h                               STRING
+    ,user__kv_price_tag_click_rt3h                                   STRING
+    ,user__kv_promotion_channel_click_rt3h                           STRING
+    ,user__kv_publish_user_click_rt3h                                STRING
+    ,user__kv_site_click_rt3h                                        STRING
+    ,user__kv_spu_id_click_rt3h                                      STRING
+    ,user__kv_discount_intensity_click_rt3h                          STRING
+    ,user__kv_dianpupingfen_click_rt3h                               STRING
+    ,user__kv_pinpaidengji_click_rt3h                                STRING
+    ,user__kv_dianpufensi_click_rt3h                                 STRING
+    ,user__kv_item_type_click_rt3h                                   STRING
+    ,user__kv_username_click_rt3h                                    STRING
+    ,user__kv_item_id_conversion_rt3h                                STRING
+    ,user__kv_cate_id_path_conversion_rt3h                           STRING
+    ,user__kv_related_goods_ids_conversion_rt3h                      STRING
+    ,user__kv_brand_conversion_rt3h                                  STRING
+    ,user__kv_core_entity_conversion_rt3h                            STRING
+    ,user__kv_first_cate_id_conversion_rt3h                          STRING
+    ,user__kv_second_cate_id_conversion_rt3h                         STRING
+    ,user__kv_third_cate_id_conversion_rt3h                          STRING
+    ,user__kv_price_tag_conversion_rt3h                              STRING
+    ,user__kv_promotion_channel_conversion_rt3h                      STRING
+    ,user__kv_publish_user_conversion_rt3h                           STRING
+    ,user__kv_site_conversion_rt3h                                   STRING
+    ,user__kv_spu_id_conversion_rt3h                                 STRING
+    ,user__kv_discount_intensity_conversion_rt3h                     STRING
+    ,user__kv_dianpupingfen_conversion_rt3h                          STRING
+    ,user__kv_pinpaidengji_conversion_rt3h                           STRING
+    ,user__kv_dianpufensi_conversion_rt3h                            STRING
+    ,user__kv_item_type_conversion_rt3h                              STRING
+    ,user__kv_username_conversion_rt3h                               STRING
+    ,user__kv_item_id_favorite_rt3h                                  STRING
+    ,user__kv_cate_id_path_favorite_rt3h                             STRING
+    ,user__kv_related_goods_ids_favorite_rt3h                        STRING
+    ,user__kv_brand_favorite_rt3h                                    STRING
+    ,user__kv_core_entity_favorite_rt3h                              STRING
+    ,user__kv_first_cate_id_favorite_rt3h                            STRING
+    ,user__kv_second_cate_id_favorite_rt3h                           STRING
+    ,user__kv_third_cate_id_favorite_rt3h                            STRING
+    ,user__kv_price_tag_favorite_rt3h                                STRING
+    ,user__kv_promotion_channel_favorite_rt3h                        STRING
+    ,user__kv_publish_user_favorite_rt3h                             STRING
+    ,user__kv_site_favorite_rt3h                                     STRING
+    ,user__kv_spu_id_favorite_rt3h                                   STRING
+    ,user__kv_discount_intensity_favorite_rt3h                       STRING
+    ,user__kv_dianpupingfen_favorite_rt3h                            STRING
+    ,user__kv_pinpaidengji_favorite_rt3h                             STRING
+    ,user__kv_dianpufensi_favorite_rt3h                              STRING
+    ,user__kv_item_type_favorite_rt3h                                STRING
+    ,user__kv_username_favorite_rt3h                                 STRING
+    ,user__kv_item_id_click_rt12h                                    STRING
+    ,user__kv_cate_id_path_click_rt12h                               STRING
+    ,user__kv_related_goods_ids_click_rt12h                          STRING
+    ,user__kv_brand_click_rt12h                                      STRING
+    ,user__kv_core_entity_click_rt12h                                STRING
+    ,user__kv_first_cate_id_click_rt12h                              STRING
+    ,user__kv_second_cate_id_click_rt12h                             STRING
+    ,user__kv_third_cate_id_click_rt12h                              STRING
+    ,user__kv_price_tag_click_rt12h                                  STRING
+    ,user__kv_promotion_channel_click_rt12h                          STRING
+    ,user__kv_publish_user_click_rt12h                               STRING
+    ,user__kv_site_click_rt12h                                       STRING
+    ,user__kv_spu_id_click_rt12h                                     STRING
+    ,user__kv_discount_intensity_click_rt12h                         STRING
+    ,user__kv_dianpupingfen_click_rt12h                              STRING
+    ,user__kv_pinpaidengji_click_rt12h                               STRING
+    ,user__kv_dianpufensi_click_rt12h                                STRING
+    ,user__kv_item_type_click_rt12h                                  STRING
+    ,user__kv_username_click_rt12h                                   STRING
+    ,user__kv_item_id_conversion_rt12h                               STRING
+    ,user__kv_cate_id_path_conversion_rt12h                          STRING
+    ,user__kv_related_goods_ids_conversion_rt12h                     STRING
+    ,user__kv_brand_conversion_rt12h                                 STRING
+    ,user__kv_core_entity_conversion_rt12h                           STRING
+    ,user__kv_first_cate_id_conversion_rt12h                         STRING
+    ,user__kv_second_cate_id_conversion_rt12h                        STRING
+    ,user__kv_third_cate_id_conversion_rt12h                         STRING
+    ,user__kv_price_tag_conversion_rt12h                             STRING
+    ,user__kv_promotion_channel_conversion_rt12h                     STRING
+    ,user__kv_publish_user_conversion_rt12h                          STRING
+    ,user__kv_site_conversion_rt12h                                  STRING
+    ,user__kv_spu_id_conversion_rt12h                                STRING
+    ,user__kv_discount_intensity_conversion_rt12h                    STRING
+    ,user__kv_dianpupingfen_conversion_rt12h                         STRING
+    ,user__kv_pinpaidengji_conversion_rt12h                          STRING
+    ,user__kv_dianpufensi_conversion_rt12h                           STRING
+    ,user__kv_item_type_conversion_rt12h                             STRING
+    ,user__kv_username_conversion_rt12h                              STRING
+    ,user__kv_item_id_favorite_rt12h                                 STRING
+    ,user__kv_cate_id_path_favorite_rt12h                            STRING
+    ,user__kv_related_goods_ids_favorite_rt12h                       STRING
+    ,user__kv_brand_favorite_rt12h                                   STRING
+    ,user__kv_core_entity_favorite_rt12h                             STRING
+    ,user__kv_first_cate_id_favorite_rt12h                           STRING
+    ,user__kv_second_cate_id_favorite_rt12h                          STRING
+    ,user__kv_third_cate_id_favorite_rt12h                           STRING
+    ,user__kv_price_tag_favorite_rt12h                               STRING
+    ,user__kv_promotion_channel_favorite_rt12h                       STRING
+    ,user__kv_publish_user_favorite_rt12h                            STRING
+    ,user__kv_site_favorite_rt12h                                    STRING
+    ,user__kv_spu_id_favorite_rt12h                                  STRING
+    ,user__kv_discount_intensity_favorite_rt12h                      STRING
+    ,user__kv_dianpupingfen_favorite_rt12h                           STRING
+    ,user__kv_pinpaidengji_favorite_rt12h                            STRING
+    ,user__kv_dianpufensi_favorite_rt12h                             STRING
+    ,user__kv_item_type_favorite_rt12h                               STRING
+    ,user__kv_username_favorite_rt12h                                STRING
+    ,user__kv_item_id_click_rt24h                                    STRING
+    ,user__kv_cate_id_path_click_rt24h                               STRING
+    ,user__kv_related_goods_ids_click_rt24h                          STRING
+    ,user__kv_brand_click_rt24h                                      STRING
+    ,user__kv_core_entity_click_rt24h                                STRING
+    ,user__kv_first_cate_id_click_rt24h                              STRING
+    ,user__kv_second_cate_id_click_rt24h                             STRING
+    ,user__kv_third_cate_id_click_rt24h                              STRING
+    ,user__kv_price_tag_click_rt24h                                  STRING
+    ,user__kv_promotion_channel_click_rt24h                          STRING
+    ,user__kv_publish_user_click_rt24h                               STRING
+    ,user__kv_site_click_rt24h                                       STRING
+    ,user__kv_spu_id_click_rt24h                                     STRING
+    ,user__kv_discount_intensity_click_rt24h                         STRING
+    ,user__kv_dianpupingfen_click_rt24h                              STRING
+    ,user__kv_pinpaidengji_click_rt24h                               STRING
+    ,user__kv_dianpufensi_click_rt24h                                STRING
+    ,user__kv_item_type_click_rt24h                                  STRING
+    ,user__kv_username_click_rt24h                                   STRING
+    ,user__kv_item_id_conversion_rt24h                               STRING
+    ,user__kv_cate_id_path_conversion_rt24h                          STRING
+    ,user__kv_related_goods_ids_conversion_rt24h                     STRING
+    ,user__kv_brand_conversion_rt24h                                 STRING
+    ,user__kv_core_entity_conversion_rt24h                           STRING
+    ,user__kv_first_cate_id_conversion_rt24h                         STRING
+    ,user__kv_second_cate_id_conversion_rt24h                        STRING
+    ,user__kv_third_cate_id_conversion_rt24h                         STRING
+    ,user__kv_price_tag_conversion_rt24h                             STRING
+    ,user__kv_promotion_channel_conversion_rt24h                     STRING
+    ,user__kv_publish_user_conversion_rt24h                          STRING
+    ,user__kv_site_conversion_rt24h                                  STRING
+    ,user__kv_spu_id_conversion_rt24h                                STRING
+    ,user__kv_discount_intensity_conversion_rt24h                    STRING
+    ,user__kv_dianpupingfen_conversion_rt24h                         STRING
+    ,user__kv_pinpaidengji_conversion_rt24h                          STRING
+    ,user__kv_dianpufensi_conversion_rt24h                           STRING
+    ,user__kv_item_type_conversion_rt24h                             STRING
+    ,user__kv_username_conversion_rt24h                              STRING
+    ,user__kv_item_id_favorite_rt24h                                 STRING
+    ,user__kv_cate_id_path_favorite_rt24h                            STRING
+    ,user__kv_related_goods_ids_favorite_rt24h                       STRING
+    ,user__kv_brand_favorite_rt24h                                   STRING
+    ,user__kv_core_entity_favorite_rt24h                             STRING
+    ,user__kv_first_cate_id_favorite_rt24h                           STRING
+    ,user__kv_second_cate_id_favorite_rt24h                          STRING
+    ,user__kv_third_cate_id_favorite_rt24h                           STRING
+    ,user__kv_price_tag_favorite_rt24h                               STRING
+    ,user__kv_promotion_channel_favorite_rt24h                       STRING
+    ,user__kv_publish_user_favorite_rt24h                            STRING
+    ,user__kv_site_favorite_rt24h                                    STRING
+    ,user__kv_spu_id_favorite_rt24h                                  STRING
+    ,user__kv_discount_intensity_favorite_rt24h                      STRING
+    ,user__kv_dianpupingfen_favorite_rt24h                           STRING
+    ,user__kv_pinpaidengji_favorite_rt24h                            STRING
+    ,user__kv_dianpufensi_favorite_rt24h                             STRING
+    ,user__kv_item_type_favorite_rt24h                               STRING
+    ,user__kv_username_favorite_rt24h                                STRING
+    ,click_10_seq__item_id                                           STRING
+    ,click_10_seq__cate_id_path                                      STRING
+    ,click_10_seq__related_goods_ids                                 STRING
+    ,click_10_seq__brand                                             STRING
+    ,click_10_seq__core_entity                                       STRING
+    ,click_10_seq__first_cate_id                                     STRING
+    ,click_10_seq__second_cate_id                                    STRING
+    ,click_10_seq__third_cate_id                                     STRING
+    ,click_10_seq__price_tag                                         STRING
+    ,click_10_seq__promotion_channel                                 STRING
+    ,click_10_seq__publish_user                                      STRING
+    ,click_10_seq__site                                              STRING
+    ,click_10_seq__spu_id                                            STRING
+    ,click_10_seq__discount_intensity                                STRING
+    ,click_10_seq__dianpupingfen                                     STRING
+    ,click_10_seq__pinpaidengji                                      STRING
+    ,click_10_seq__dianpufensi                                       STRING
+    ,click_10_seq__item_type                                         STRING
+    ,click_10_seq__username                                          STRING
+    ,click_10_seq__ts                                                STRING
+    ,click_50_seq__item_id                                           STRING
+    ,click_50_seq__cate_id_path                                      STRING
+    ,click_50_seq__related_goods_ids                                 STRING
+    ,click_50_seq__brand                                             STRING
+    ,click_50_seq__core_entity                                       STRING
+    ,click_50_seq__first_cate_id                                     STRING
+    ,click_50_seq__second_cate_id                                    STRING
+    ,click_50_seq__third_cate_id                                     STRING
+    ,click_50_seq__price_tag                                         STRING
+    ,click_50_seq__promotion_channel                                 STRING
+    ,click_50_seq__publish_user                                      STRING
+    ,click_50_seq__site                                              STRING
+    ,click_50_seq__spu_id                                            STRING
+    ,click_50_seq__discount_intensity                                STRING
+    ,click_50_seq__dianpupingfen                                     STRING
+    ,click_50_seq__pinpaidengji                                      STRING
+    ,click_50_seq__dianpufensi                                       STRING
+    ,click_50_seq__item_type                                         STRING
+    ,click_50_seq__username                                          STRING
+    ,click_50_seq__ts                                                STRING
+    ,conversion_5_seq__item_id                                       STRING
+    ,conversion_5_seq__cate_id_path                                  STRING
+    ,conversion_5_seq__related_goods_ids                             STRING
+    ,conversion_5_seq__brand                                         STRING
+    ,conversion_5_seq__core_entity                                   STRING
+    ,conversion_5_seq__first_cate_id                                 STRING
+    ,conversion_5_seq__second_cate_id                                STRING
+    ,conversion_5_seq__third_cate_id                                 STRING
+    ,conversion_5_seq__price_tag                                     STRING
+    ,conversion_5_seq__promotion_channel                             STRING
+    ,conversion_5_seq__publish_user                                  STRING
+    ,conversion_5_seq__site                                          STRING
+    ,conversion_5_seq__spu_id                                        STRING
+    ,conversion_5_seq__discount_intensity                            STRING
+    ,conversion_5_seq__dianpupingfen                                 STRING
+    ,conversion_5_seq__pinpaidengji                                  STRING
+    ,conversion_5_seq__dianpufensi                                   STRING
+    ,conversion_5_seq__item_type                                     STRING
+    ,conversion_5_seq__username                                      STRING
+    ,conversion_5_seq__ts                                            STRING
+    ,conversion_20_seq__item_id                                      STRING
+    ,conversion_20_seq__cate_id_path                                 STRING
+    ,conversion_20_seq__related_goods_ids                            STRING
+    ,conversion_20_seq__brand                                        STRING
+    ,conversion_20_seq__core_entity                                  STRING
+    ,conversion_20_seq__first_cate_id                                STRING
+    ,conversion_20_seq__second_cate_id                               STRING
+    ,conversion_20_seq__third_cate_id                                STRING
+    ,conversion_20_seq__price_tag                                    STRING
+    ,conversion_20_seq__promotion_channel                            STRING
+    ,conversion_20_seq__publish_user                                 STRING
+    ,conversion_20_seq__site                                         STRING
+    ,conversion_20_seq__spu_id                                       STRING
+    ,conversion_20_seq__discount_intensity                           STRING
+    ,conversion_20_seq__dianpupingfen                                STRING
+    ,conversion_20_seq__pinpaidengji                                 STRING
+    ,conversion_20_seq__dianpufensi                                  STRING
+    ,conversion_20_seq__item_type                                    STRING
+    ,conversion_20_seq__username                                     STRING
+    ,conversion_20_seq__ts                                           STRING
+    ,favorite_5_seq__item_id                                         STRING
+    ,favorite_5_seq__cate_id_path                                    STRING
+    ,favorite_5_seq__related_goods_ids                               STRING
+    ,favorite_5_seq__brand                                           STRING
+    ,favorite_5_seq__core_entity                                     STRING
+    ,favorite_5_seq__first_cate_id                                   STRING
+    ,favorite_5_seq__second_cate_id                                  STRING
+    ,favorite_5_seq__third_cate_id                                   STRING
+    ,favorite_5_seq__price_tag                                       STRING
+    ,favorite_5_seq__promotion_channel                               STRING
+    ,favorite_5_seq__publish_user                                    STRING
+    ,favorite_5_seq__site                                            STRING
+    ,favorite_5_seq__spu_id                                          STRING
+    ,favorite_5_seq__discount_intensity                              STRING
+    ,favorite_5_seq__dianpupingfen                                   STRING
+    ,favorite_5_seq__pinpaidengji                                    STRING
+    ,favorite_5_seq__dianpufensi                                     STRING
+    ,favorite_5_seq__item_type                                       STRING
+    ,favorite_5_seq__username                                        STRING
+    ,favorite_5_seq__ts                                              STRING
+    ,favorite_10_seq__item_id                                        STRING
+    ,favorite_10_seq__cate_id_path                                   STRING
+    ,favorite_10_seq__related_goods_ids                              STRING
+    ,favorite_10_seq__brand                                          STRING
+    ,favorite_10_seq__core_entity                                    STRING
+    ,favorite_10_seq__first_cate_id                                  STRING
+    ,favorite_10_seq__second_cate_id                                 STRING
+    ,favorite_10_seq__third_cate_id                                  STRING
+    ,favorite_10_seq__price_tag                                      STRING
+    ,favorite_10_seq__promotion_channel                              STRING
+    ,favorite_10_seq__publish_user                                   STRING
+    ,favorite_10_seq__site                                           STRING
+    ,favorite_10_seq__spu_id                                         STRING
+    ,favorite_10_seq__discount_intensity                             STRING
+    ,favorite_10_seq__dianpupingfen                                  STRING
+    ,favorite_10_seq__pinpaidengji                                   STRING
+    ,favorite_10_seq__dianpufensi                                    STRING
+    ,favorite_10_seq__item_type                                      STRING
+    ,favorite_10_seq__username                                       STRING
+    ,favorite_10_seq__ts                                             STRING
+    ,pub_hours                                                       DOUBLE
+    ,reg_days                                                        DOUBLE
+    ,brand_x_price_tag                                               STRING
+    ,brand_x_cate_id_path                                            STRING
+    ,brand_x_gender                                                  STRING
+    ,brand_x_age_group                                               STRING
+    ,cate_id_path_x_gender                                           STRING
+    ,cate_id_path_x_age_group                                        STRING
+    ,bhv_gender                                                      STRING
+    ,cate_prefer                                                     STRING
+    ,crowd_prefer                                                    STRING
+    ,bhv_time                                                        STRING
+    ,consume_power                                                   DOUBLE
+    ,price_prefer                                                    STRING
+    ,city_level                                                      STRING
+    ,city_region                                                     STRING
+    ,site_prefer                                                     STRING
+    ,active_days                                                     BIGINT
+    ,active_bhv                                                      STRING
+    ,shop_type                                                       STRING
+    ,shop_subtype                                                    STRING
+    ,comment_tag                                                     STRING
+    ,sales_month_tag                                                 STRING
+    ,top_tag                                                         STRING
+    ,item_class_prefer                                               STRING
+    ,item_audience_prefer                                            STRING
+    ,item_gender_prefer                                              STRING
+    ,potential_score                                                 STRING
+    ,srh_hot                                                         STRING
+    ,price_drop_freq                                                 STRING
+    ,item_comment_tag                                                STRING
+    ,shop_life_time                                                  STRING
+    ,his_high_level                                                  STRING
+    ,f_req_page                                                      STRING
+    ,f_req_domain                                                    STRING
+)
+PARTITIONED BY
+(
+    dt                                                               STRING
+)
+STORED AS aliorc
+TBLPROPERTIES ('columnar.nested.type' = 'true')
+LIFECYCLE 90
+;
+
+set odps.sql.hive.compatible=true;
+INSERT OVERWRITE TABLE feature_mall_home_flow_2604_ctrcvr_sorter_v2_training_set PARTITION (dt = '${bdp.system.bizdate}')
+SELECT  sq0.event_unix_time
+        ,sq0.__item_id__
+        ,sq0.item_id
+        ,sq0.scene
+        ,sq0.__mmb_id__
+        ,sq0.mmb_id
+        ,COALESCE(sq0.request_id,sq54.request_id) AS request_id
+        ,sq0.page
+        ,sq0.day_h
+        ,sq0.week_day
+        ,sq0.is_click
+        ,sq0.is_conversion
+        ,sq33.type
+        ,sq33.gender
+        ,sq33.age_group
+        ,sq33.reg_type
+        ,sq33.mmb_level
+        ,sq33.user_status
+        ,sq33.mmb_status
+        ,sq33.intergral
+        ,sq33.gold_coin
+        ,sq33.is_subscribe_discount
+        ,sq33.is_subscribe_savemoney
+        ,sq33.is_subscribe_clockin
+        ,sq33.receive_push
+        ,sq33.is_not_disturb
+        ,sq33.is_atpush
+        ,sq33.province
+        ,sq33.city
+        ,sq33.area_code
+        ,sq33.reg_time
+        ,sq33.login_province
+        ,sq33.login_city
+        ,sq33.login_time
+        ,sq33.sdk_version
+        ,sq33.app_version
+        ,sq33.os_type
+        ,sq33.os_version
+        ,sq33.dev_brand
+        ,sq33.dev_model
+        ,sq33.jpush
+        ,sq33.first_campaign_name
+        ,sq33.first_utm_campaign
+        ,sq33.first_utm_source
+        ,sq33.first_ad_name
+        ,sq33.first_site_name
+        ,sq33.install_apps
+        ,sq33.lifecycle_tags
+        ,sq55.item_type
+        ,sq55.cate
+        ,sq55.cate_id_path
+        ,sq55.copyright_end
+        ,sq55.create_time
+        ,sq55.current_price
+        ,sq55.keyword
+        ,sq55.pub_time
+        ,sq55.tags
+        ,sq55.title
+        ,sq55.related_goods_ids
+        ,sq55.brand
+        ,sq55.core_entity
+        ,sq55.dianpufensi
+        ,sq55.dianpupingfen
+        ,sq55.discount_intensity
+        ,sq55.discount_type
+        ,sq55.first_cate_id
+        ,sq55.second_cate_id
+        ,sq55.third_cate_id
+        ,sq55.gender_score
+        ,sq55.level
+        ,sq55.modifiers
+        ,sq55.pinpaidengji
+        ,sq55.price_tag
+        ,sq55.promotion_channel
+        ,sq55.publish_user
+        ,sq55.shop_id
+        ,sq55.site
+        ,sq55.spu_id
+        ,sq55.sqk_id
+        ,sq55.sub_title
+        ,sq55.username
+        ,sq1.title_vector
+        ,sq1.sub_title_vector
+        ,sq42.gender__ratio_click_exposure_15d
+        ,sq42.gender__ratio_conversion_click_15d
+        ,sq42.gender__ratio_favorite_click_15d
+        ,sq42.gender__kv_ratio_brand_click_exposure_15d
+        ,sq42.gender__kv_ratio_cate_id_path_click_exposure_15d
+        ,sq42.gender__kv_ratio_core_entity_click_exposure_15d
+        ,sq42.gender__kv_ratio_first_cate_id_click_exposure_15d
+        ,sq42.gender__kv_ratio_second_cate_id_click_exposure_15d
+        ,sq42.gender__kv_ratio_third_cate_id_click_exposure_15d
+        ,sq42.gender__kv_ratio_price_tag_click_exposure_15d
+        ,sq42.gender__kv_ratio_promotion_channel_click_exposure_15d
+        ,sq42.gender__kv_ratio_publish_user_click_exposure_15d
+        ,sq42.gender__kv_ratio_site_click_exposure_15d
+        ,sq42.gender__kv_ratio_discount_intensity_click_exposure_15d
+        ,sq42.gender__kv_ratio_dianpupingfen_click_exposure_15d
+        ,sq42.gender__kv_ratio_pinpaidengji_click_exposure_15d
+        ,sq42.gender__kv_ratio_dianpufensi_click_exposure_15d
+        ,sq42.gender__kv_ratio_item_id_click_exposure_15d
+        ,sq42.gender__kv_ratio_related_goods_ids_click_exposure_15d
+        ,sq42.gender__kv_ratio_spu_id_click_exposure_15d
+        ,sq42.gender__kv_ratio_username_click_exposure_15d
+        ,sq42.gender__kv_ratio_brand_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_cate_id_path_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_core_entity_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_first_cate_id_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_second_cate_id_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_third_cate_id_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_price_tag_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_promotion_channel_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_publish_user_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_site_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_discount_intensity_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_dianpupingfen_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_pinpaidengji_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_dianpufensi_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_item_id_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_related_goods_ids_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_spu_id_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_username_conversion_exposure_15d
+        ,sq42.gender__kv_ratio_brand_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_cate_id_path_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_core_entity_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_first_cate_id_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_second_cate_id_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_third_cate_id_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_price_tag_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_promotion_channel_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_publish_user_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_site_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_discount_intensity_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_dianpupingfen_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_pinpaidengji_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_dianpufensi_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_item_id_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_related_goods_ids_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_spu_id_favorite_exposure_15d
+        ,sq42.gender__kv_ratio_username_favorite_exposure_15d
+        ,sq34.age_group__ratio_click_exposure_15d
+        ,sq34.age_group__ratio_conversion_click_15d
+        ,sq34.age_group__ratio_favorite_click_15d
+        ,sq34.age_group__kv_ratio_item_id_click_exposure_15d
+        ,sq34.age_group__kv_ratio_cate_id_path_click_exposure_15d
+        ,sq34.age_group__kv_ratio_related_goods_ids_click_exposure_15d
+        ,sq34.age_group__kv_ratio_brand_click_exposure_15d
+        ,sq34.age_group__kv_ratio_core_entity_click_exposure_15d
+        ,sq34.age_group__kv_ratio_first_cate_id_click_exposure_15d
+        ,sq34.age_group__kv_ratio_second_cate_id_click_exposure_15d
+        ,sq34.age_group__kv_ratio_third_cate_id_click_exposure_15d
+        ,sq34.age_group__kv_ratio_price_tag_click_exposure_15d
+        ,sq34.age_group__kv_ratio_promotion_channel_click_exposure_15d
+        ,sq34.age_group__kv_ratio_publish_user_click_exposure_15d
+        ,sq34.age_group__kv_ratio_site_click_exposure_15d
+        ,sq34.age_group__kv_ratio_spu_id_click_exposure_15d
+        ,sq34.age_group__kv_ratio_discount_intensity_click_exposure_15d
+        ,sq34.age_group__kv_ratio_dianpupingfen_click_exposure_15d
+        ,sq34.age_group__kv_ratio_pinpaidengji_click_exposure_15d
+        ,sq34.age_group__kv_ratio_dianpufensi_click_exposure_15d
+        ,sq34.age_group__kv_ratio_username_click_exposure_15d
+        ,sq34.age_group__kv_ratio_item_id_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_cate_id_path_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_related_goods_ids_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_brand_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_core_entity_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_first_cate_id_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_second_cate_id_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_third_cate_id_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_price_tag_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_promotion_channel_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_publish_user_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_site_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_spu_id_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_discount_intensity_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_dianpupingfen_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_pinpaidengji_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_dianpufensi_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_username_conversion_exposure_15d
+        ,sq34.age_group__kv_ratio_item_id_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_cate_id_path_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_related_goods_ids_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_brand_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_core_entity_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_first_cate_id_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_second_cate_id_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_third_cate_id_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_price_tag_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_promotion_channel_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_publish_user_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_site_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_spu_id_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_discount_intensity_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_dianpupingfen_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_pinpaidengji_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_dianpufensi_favorite_exposure_15d
+        ,sq34.age_group__kv_ratio_username_favorite_exposure_15d
+        ,sq44.login_city__ratio_click_exposure_15d
+        ,sq44.login_city__ratio_conversion_click_15d
+        ,sq44.login_city__ratio_favorite_click_15d
+        ,sq44.login_city__kv_ratio_item_id_click_exposure_15d
+        ,sq44.login_city__kv_ratio_cate_id_path_click_exposure_15d
+        ,sq44.login_city__kv_ratio_related_goods_ids_click_exposure_15d
+        ,sq44.login_city__kv_ratio_brand_click_exposure_15d
+        ,sq44.login_city__kv_ratio_core_entity_click_exposure_15d
+        ,sq44.login_city__kv_ratio_first_cate_id_click_exposure_15d
+        ,sq44.login_city__kv_ratio_second_cate_id_click_exposure_15d
+        ,sq44.login_city__kv_ratio_third_cate_id_click_exposure_15d
+        ,sq44.login_city__kv_ratio_price_tag_click_exposure_15d
+        ,sq44.login_city__kv_ratio_promotion_channel_click_exposure_15d
+        ,sq44.login_city__kv_ratio_publish_user_click_exposure_15d
+        ,sq44.login_city__kv_ratio_site_click_exposure_15d
+        ,sq44.login_city__kv_ratio_spu_id_click_exposure_15d
+        ,sq44.login_city__kv_ratio_discount_intensity_click_exposure_15d
+        ,sq44.login_city__kv_ratio_dianpupingfen_click_exposure_15d
+        ,sq44.login_city__kv_ratio_pinpaidengji_click_exposure_15d
+        ,sq44.login_city__kv_ratio_dianpufensi_click_exposure_15d
+        ,sq44.login_city__kv_ratio_username_click_exposure_15d
+        ,sq44.login_city__kv_ratio_item_id_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_cate_id_path_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_related_goods_ids_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_brand_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_core_entity_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_first_cate_id_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_second_cate_id_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_third_cate_id_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_price_tag_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_promotion_channel_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_publish_user_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_site_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_spu_id_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_discount_intensity_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_dianpupingfen_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_pinpaidengji_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_dianpufensi_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_username_conversion_exposure_15d
+        ,sq44.login_city__kv_ratio_item_id_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_cate_id_path_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_related_goods_ids_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_brand_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_core_entity_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_first_cate_id_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_second_cate_id_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_third_cate_id_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_price_tag_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_promotion_channel_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_publish_user_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_site_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_spu_id_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_discount_intensity_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_dianpupingfen_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_pinpaidengji_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_dianpufensi_favorite_exposure_15d
+        ,sq44.login_city__kv_ratio_username_favorite_exposure_15d
+        ,sq38.dev_brand__ratio_click_exposure_15d
+        ,sq38.dev_brand__ratio_conversion_exposure_15d
+        ,sq38.dev_brand__ratio_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_item_id_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_cate_id_path_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_related_goods_ids_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_brand_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_core_entity_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_first_cate_id_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_second_cate_id_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_third_cate_id_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_price_tag_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_promotion_channel_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_publish_user_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_site_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_spu_id_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_discount_intensity_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_dianpupingfen_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_pinpaidengji_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_dianpufensi_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_item_type_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_username_click_exposure_15d
+        ,sq38.dev_brand__kv_ratio_item_id_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_cate_id_path_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_related_goods_ids_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_brand_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_core_entity_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_first_cate_id_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_second_cate_id_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_third_cate_id_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_price_tag_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_promotion_channel_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_publish_user_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_site_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_spu_id_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_discount_intensity_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_dianpupingfen_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_pinpaidengji_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_dianpufensi_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_item_type_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_username_conversion_exposure_15d
+        ,sq38.dev_brand__kv_ratio_item_id_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_cate_id_path_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_related_goods_ids_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_brand_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_core_entity_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_first_cate_id_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_second_cate_id_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_third_cate_id_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_price_tag_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_promotion_channel_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_publish_user_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_site_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_spu_id_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_discount_intensity_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_dianpupingfen_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_pinpaidengji_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_dianpufensi_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_item_type_favorite_exposure_15d
+        ,sq38.dev_brand__kv_ratio_username_favorite_exposure_15d
+        ,sq45.user__cnt_favorite_15d
+        ,sq45.user__cnt_conversion_15d
+        ,sq45.user__cnt_click_15d
+        ,sq45.user__num_favorite_avg_current_price_15d
+        ,sq45.user__num_conversion_avg_current_price_15d
+        ,sq45.user__num_click_avg_current_price_15d
+        ,sq45.user__kv_cate_id_path_click_15d
+        ,sq45.user__kv_related_goods_ids_click_15d
+        ,sq45.user__kv_brand_click_15d
+        ,sq45.user__kv_first_cate_id_click_15d
+        ,sq45.user__kv_second_cate_id_click_15d
+        ,sq45.user__kv_third_cate_id_click_15d
+        ,sq45.user__kv_price_tag_click_15d
+        ,sq45.user__kv_promotion_channel_click_15d
+        ,sq45.user__kv_publish_user_click_15d
+        ,sq45.user__kv_site_click_15d
+        ,sq45.user__kv_discount_intensity_click_15d
+        ,sq45.user__kv_dianpupingfen_click_15d
+        ,sq45.user__kv_pinpaidengji_click_15d
+        ,sq45.user__kv_dianpufensi_click_15d
+        ,sq45.user__kv_gender_score_click_15d
+        ,sq45.user__kv_item_type_click_15d
+        ,sq45.user__kv_spu_id_click_15d
+        ,sq45.user__kv_item_id_click_15d
+        ,sq45.user__kv_core_entity_click_15d
+        ,sq45.user__kv_username_click_15d
+        ,sq45.user__kv_cate_id_path_conversion_15d
+        ,sq45.user__kv_related_goods_ids_conversion_15d
+        ,sq45.user__kv_brand_conversion_15d
+        ,sq45.user__kv_first_cate_id_conversion_15d
+        ,sq45.user__kv_second_cate_id_conversion_15d
+        ,sq45.user__kv_third_cate_id_conversion_15d
+        ,sq45.user__kv_price_tag_conversion_15d
+        ,sq45.user__kv_promotion_channel_conversion_15d
+        ,sq45.user__kv_publish_user_conversion_15d
+        ,sq45.user__kv_site_conversion_15d
+        ,sq45.user__kv_discount_intensity_conversion_15d
+        ,sq45.user__kv_dianpupingfen_conversion_15d
+        ,sq45.user__kv_pinpaidengji_conversion_15d
+        ,sq45.user__kv_dianpufensi_conversion_15d
+        ,sq45.user__kv_gender_score_conversion_15d
+        ,sq45.user__kv_item_type_conversion_15d
+        ,sq45.user__kv_spu_id_conversion_15d
+        ,sq45.user__kv_item_id_conversion_15d
+        ,sq45.user__kv_core_entity_conversion_15d
+        ,sq45.user__kv_username_conversion_15d
+        ,sq45.user__kv_cate_id_path_favorite_15d
+        ,sq45.user__kv_related_goods_ids_favorite_15d
+        ,sq45.user__kv_brand_favorite_15d
+        ,sq45.user__kv_first_cate_id_favorite_15d
+        ,sq45.user__kv_second_cate_id_favorite_15d
+        ,sq45.user__kv_third_cate_id_favorite_15d
+        ,sq45.user__kv_price_tag_favorite_15d
+        ,sq45.user__kv_promotion_channel_favorite_15d
+        ,sq45.user__kv_publish_user_favorite_15d
+        ,sq45.user__kv_site_favorite_15d
+        ,sq45.user__kv_discount_intensity_favorite_15d
+        ,sq45.user__kv_dianpupingfen_favorite_15d
+        ,sq45.user__kv_pinpaidengji_favorite_15d
+        ,sq45.user__kv_dianpufensi_favorite_15d
+        ,sq45.user__kv_gender_score_favorite_15d
+        ,sq45.user__kv_item_type_favorite_15d
+        ,sq45.user__kv_spu_id_favorite_15d
+        ,sq45.user__kv_item_id_favorite_15d
+        ,sq45.user__kv_core_entity_favorite_15d
+        ,sq45.user__kv_username_favorite_15d
+        ,sq12.first_cate_id__ratio_click_exposure_15d
+        ,sq12.first_cate_id__ratio_conversion_exposure_15d
+        ,sq12.first_cate_id__ratio_favorite_click_15d
+        ,sq13.first_cate_id__ratio_click_exposure_3d
+        ,sq13.first_cate_id__ratio_conversion_exposure_3d
+        ,sq13.first_cate_id__ratio_favorite_click_3d
+        ,sq41.first_cate_id__ratio_click_exposure_1d
+        ,sq41.first_cate_id__ratio_conversion_exposure_1d
+        ,sq41.first_cate_id__ratio_favorite_click_1d
+        ,sq24.second_cate_id__ratio_click_exposure_15d
+        ,sq24.second_cate_id__ratio_conversion_exposure_15d
+        ,sq24.second_cate_id__ratio_favorite_click_15d
+        ,sq25.second_cate_id__ratio_click_exposure_3d
+        ,sq25.second_cate_id__ratio_conversion_exposure_3d
+        ,sq25.second_cate_id__ratio_favorite_click_3d
+        ,sq50.second_cate_id__ratio_click_exposure_1d
+        ,sq50.second_cate_id__ratio_conversion_exposure_1d
+        ,sq50.second_cate_id__ratio_favorite_click_1d
+        ,sq4.cate_id_path__ratio_click_exposure_15d
+        ,sq4.cate_id_path__ratio_conversion_exposure_15d
+        ,sq4.cate_id_path__ratio_favorite_click_15d
+        ,sq5.cate_id_path__ratio_click_exposure_3d
+        ,sq5.cate_id_path__ratio_conversion_exposure_3d
+        ,sq5.cate_id_path__ratio_favorite_click_3d
+        ,sq36.cate_id_path__ratio_click_exposure_1d
+        ,sq36.cate_id_path__ratio_conversion_exposure_1d
+        ,sq36.cate_id_path__ratio_favorite_click_1d
+        ,sq2.brand__ratio_click_exposure_15d
+        ,sq2.brand__ratio_conversion_exposure_15d
+        ,sq2.brand__ratio_favorite_click_15d
+        ,sq3.brand__ratio_click_exposure_3d
+        ,sq3.brand__ratio_conversion_exposure_3d
+        ,sq3.brand__ratio_favorite_click_3d
+        ,sq35.brand__ratio_click_exposure_1d
+        ,sq35.brand__ratio_conversion_exposure_1d
+        ,sq35.brand__ratio_favorite_click_1d
+        ,sq26.site__ratio_click_exposure_15d
+        ,sq26.site__ratio_conversion_exposure_15d
+        ,sq26.site__ratio_favorite_click_15d
+        ,sq27.site__ratio_click_exposure_3d
+        ,sq27.site__ratio_conversion_exposure_3d
+        ,sq27.site__ratio_favorite_click_3d
+        ,sq51.site__ratio_click_exposure_1d
+        ,sq51.site__ratio_conversion_exposure_1d
+        ,sq51.site__ratio_favorite_click_1d
+        ,sq6.core_entity__ratio_click_exposure_15d
+        ,sq6.core_entity__ratio_conversion_exposure_15d
+        ,sq6.core_entity__ratio_favorite_click_15d
+        ,sq7.core_entity__ratio_click_exposure_3d
+        ,sq7.core_entity__ratio_conversion_exposure_3d
+        ,sq7.core_entity__ratio_favorite_click_3d
+        ,sq37.core_entity__ratio_click_exposure_1d
+        ,sq37.core_entity__ratio_conversion_exposure_1d
+        ,sq37.core_entity__ratio_favorite_click_1d
+        ,sq18.price_tag__ratio_click_exposure_15d
+        ,sq18.price_tag__ratio_conversion_exposure_15d
+        ,sq18.price_tag__ratio_favorite_click_15d
+        ,sq19.price_tag__ratio_click_exposure_3d
+        ,sq19.price_tag__ratio_conversion_exposure_3d
+        ,sq19.price_tag__ratio_favorite_click_3d
+        ,sq47.price_tag__ratio_click_exposure_1d
+        ,sq47.price_tag__ratio_conversion_exposure_1d
+        ,sq47.price_tag__ratio_favorite_click_1d
+        ,sq20.promotion_channel__ratio_click_exposure_15d
+        ,sq20.promotion_channel__ratio_conversion_exposure_15d
+        ,sq20.promotion_channel__ratio_favorite_click_15d
+        ,sq21.promotion_channel__ratio_click_exposure_3d
+        ,sq21.promotion_channel__ratio_conversion_exposure_3d
+        ,sq21.promotion_channel__ratio_favorite_click_3d
+        ,sq48.promotion_channel__ratio_click_exposure_1d
+        ,sq48.promotion_channel__ratio_conversion_exposure_1d
+        ,sq48.promotion_channel__ratio_favorite_click_1d
+        ,sq10.discount_intensity__ratio_click_exposure_15d
+        ,sq10.discount_intensity__ratio_conversion_exposure_15d
+        ,sq10.discount_intensity__ratio_favorite_click_15d
+        ,sq11.discount_intensity__ratio_click_exposure_3d
+        ,sq11.discount_intensity__ratio_conversion_exposure_3d
+        ,sq11.discount_intensity__ratio_favorite_click_3d
+        ,sq40.discount_intensity__ratio_click_exposure_1d
+        ,sq40.discount_intensity__ratio_conversion_exposure_1d
+        ,sq40.discount_intensity__ratio_favorite_click_1d
+        ,sq8.dianpupingfen__ratio_click_exposure_15d
+        ,sq8.dianpupingfen__ratio_conversion_exposure_15d
+        ,sq8.dianpupingfen__ratio_favorite_click_15d
+        ,sq9.dianpupingfen__ratio_click_exposure_3d
+        ,sq9.dianpupingfen__ratio_conversion_exposure_3d
+        ,sq9.dianpupingfen__ratio_favorite_click_3d
+        ,sq39.dianpupingfen__ratio_click_exposure_1d
+        ,sq39.dianpupingfen__ratio_conversion_exposure_1d
+        ,sq39.dianpupingfen__ratio_favorite_click_1d
+        ,sq16.pinpaidengji__ratio_click_exposure_15d
+        ,sq16.pinpaidengji__ratio_conversion_exposure_15d
+        ,sq16.pinpaidengji__ratio_favorite_click_15d
+        ,sq17.pinpaidengji__ratio_click_exposure_3d
+        ,sq17.pinpaidengji__ratio_conversion_exposure_3d
+        ,sq17.pinpaidengji__ratio_favorite_click_3d
+        ,sq46.pinpaidengji__ratio_click_exposure_1d
+        ,sq46.pinpaidengji__ratio_conversion_exposure_1d
+        ,sq46.pinpaidengji__ratio_favorite_click_1d
+        ,sq28.spu_id__ratio_click_exposure_15d
+        ,sq28.spu_id__ratio_conversion_exposure_15d
+        ,sq28.spu_id__ratio_favorite_click_15d
+        ,sq29.spu_id__ratio_click_exposure_3d
+        ,sq29.spu_id__ratio_conversion_exposure_3d
+        ,sq29.spu_id__ratio_favorite_click_3d
+        ,sq52.spu_id__ratio_click_exposure_1d
+        ,sq52.spu_id__ratio_conversion_exposure_1d
+        ,sq52.spu_id__ratio_favorite_click_1d
+        ,sq22.publish_user__ratio_click_exposure_15d
+        ,sq22.publish_user__ratio_conversion_exposure_15d
+        ,sq22.publish_user__ratio_favorite_click_15d
+        ,sq23.publish_user__ratio_click_exposure_3d
+        ,sq23.publish_user__ratio_conversion_exposure_3d
+        ,sq23.publish_user__ratio_favorite_click_3d
+        ,sq49.publish_user__ratio_click_exposure_1d
+        ,sq49.publish_user__ratio_conversion_exposure_1d
+        ,sq49.publish_user__ratio_favorite_click_1d
+        ,sq31.username__ratio_click_exposure_15d
+        ,sq31.username__ratio_conversion_exposure_15d
+        ,sq31.username__ratio_favorite_click_15d
+        ,sq32.username__ratio_click_exposure_3d
+        ,sq32.username__ratio_conversion_exposure_3d
+        ,sq32.username__ratio_favorite_click_3d
+        ,sq53.username__ratio_click_exposure_1d
+        ,sq53.username__ratio_conversion_exposure_1d
+        ,sq53.username__ratio_favorite_click_1d
+        ,sq14.item__cnt_favorite_15d
+        ,sq14.item__cnt_conversion_15d
+        ,sq14.item__cnt_click_15d
+        ,sq14.item__ratio_favorite_click_15d
+        ,sq14.item__ratio_conversion_click_15d
+        ,sq15.item__cnt_favorite_3d
+        ,sq15.item__cnt_conversion_3d
+        ,sq15.item__cnt_click_3d
+        ,sq15.item__ratio_favorite_click_3d
+        ,sq15.item__ratio_conversion_click_3d
+        ,sq43.item__cnt_favorite_1d
+        ,sq43.item__cnt_conversion_1d
+        ,sq43.item__cnt_click_1d
+        ,sq43.item__ratio_favorite_click_1d
+        ,sq43.item__ratio_conversion_click_1d
+        ,sq30.item__cnt_click_rt1h
+        ,sq30.item__cnt_conversion_rt1h
+        ,sq30.item__cnt_favorite_rt1h
+        ,sq30.item__cnt_click_rt3h
+        ,sq30.item__cnt_conversion_rt3h
+        ,sq30.item__cnt_favorite_rt3h
+        ,sq30.item__cnt_click_rt12h
+        ,sq30.item__cnt_conversion_rt12h
+        ,sq30.item__cnt_favorite_rt12h
+        ,sq30.item__cnt_click_rt24h
+        ,sq30.item__cnt_conversion_rt24h
+        ,sq30.item__cnt_favorite_rt24h
+        ,sq54.user__kv_item_id_click_rt1h
+        ,sq54.user__kv_cate_id_path_click_rt1h
+        ,sq54.user__kv_related_goods_ids_click_rt1h
+        ,sq54.user__kv_brand_click_rt1h
+        ,sq54.user__kv_core_entity_click_rt1h
+        ,sq54.user__kv_first_cate_id_click_rt1h
+        ,sq54.user__kv_second_cate_id_click_rt1h
+        ,sq54.user__kv_third_cate_id_click_rt1h
+        ,sq54.user__kv_price_tag_click_rt1h
+        ,sq54.user__kv_promotion_channel_click_rt1h
+        ,sq54.user__kv_publish_user_click_rt1h
+        ,sq54.user__kv_site_click_rt1h
+        ,sq54.user__kv_spu_id_click_rt1h
+        ,sq54.user__kv_discount_intensity_click_rt1h
+        ,sq54.user__kv_dianpupingfen_click_rt1h
+        ,sq54.user__kv_pinpaidengji_click_rt1h
+        ,sq54.user__kv_dianpufensi_click_rt1h
+        ,sq54.user__kv_item_type_click_rt1h
+        ,sq54.user__kv_username_click_rt1h
+        ,sq54.user__kv_item_id_conversion_rt1h
+        ,sq54.user__kv_cate_id_path_conversion_rt1h
+        ,sq54.user__kv_related_goods_ids_conversion_rt1h
+        ,sq54.user__kv_brand_conversion_rt1h
+        ,sq54.user__kv_core_entity_conversion_rt1h
+        ,sq54.user__kv_first_cate_id_conversion_rt1h
+        ,sq54.user__kv_second_cate_id_conversion_rt1h
+        ,sq54.user__kv_third_cate_id_conversion_rt1h
+        ,sq54.user__kv_price_tag_conversion_rt1h
+        ,sq54.user__kv_promotion_channel_conversion_rt1h
+        ,sq54.user__kv_publish_user_conversion_rt1h
+        ,sq54.user__kv_site_conversion_rt1h
+        ,sq54.user__kv_spu_id_conversion_rt1h
+        ,sq54.user__kv_discount_intensity_conversion_rt1h
+        ,sq54.user__kv_dianpupingfen_conversion_rt1h
+        ,sq54.user__kv_pinpaidengji_conversion_rt1h
+        ,sq54.user__kv_dianpufensi_conversion_rt1h
+        ,sq54.user__kv_item_type_conversion_rt1h
+        ,sq54.user__kv_username_conversion_rt1h
+        ,sq54.user__kv_item_id_favorite_rt1h
+        ,sq54.user__kv_cate_id_path_favorite_rt1h
+        ,sq54.user__kv_related_goods_ids_favorite_rt1h
+        ,sq54.user__kv_brand_favorite_rt1h
+        ,sq54.user__kv_core_entity_favorite_rt1h
+        ,sq54.user__kv_first_cate_id_favorite_rt1h
+        ,sq54.user__kv_second_cate_id_favorite_rt1h
+        ,sq54.user__kv_third_cate_id_favorite_rt1h
+        ,sq54.user__kv_price_tag_favorite_rt1h
+        ,sq54.user__kv_promotion_channel_favorite_rt1h
+        ,sq54.user__kv_publish_user_favorite_rt1h
+        ,sq54.user__kv_site_favorite_rt1h
+        ,sq54.user__kv_spu_id_favorite_rt1h
+        ,sq54.user__kv_discount_intensity_favorite_rt1h
+        ,sq54.user__kv_dianpupingfen_favorite_rt1h
+        ,sq54.user__kv_pinpaidengji_favorite_rt1h
+        ,sq54.user__kv_dianpufensi_favorite_rt1h
+        ,sq54.user__kv_item_type_favorite_rt1h
+        ,sq54.user__kv_username_favorite_rt1h
+        ,sq54.user__kv_item_id_click_rt3h
+        ,sq54.user__kv_cate_id_path_click_rt3h
+        ,sq54.user__kv_related_goods_ids_click_rt3h
+        ,sq54.user__kv_brand_click_rt3h
+        ,sq54.user__kv_core_entity_click_rt3h
+        ,sq54.user__kv_first_cate_id_click_rt3h
+        ,sq54.user__kv_second_cate_id_click_rt3h
+        ,sq54.user__kv_third_cate_id_click_rt3h
+        ,sq54.user__kv_price_tag_click_rt3h
+        ,sq54.user__kv_promotion_channel_click_rt3h
+        ,sq54.user__kv_publish_user_click_rt3h
+        ,sq54.user__kv_site_click_rt3h
+        ,sq54.user__kv_spu_id_click_rt3h
+        ,sq54.user__kv_discount_intensity_click_rt3h
+        ,sq54.user__kv_dianpupingfen_click_rt3h
+        ,sq54.user__kv_pinpaidengji_click_rt3h
+        ,sq54.user__kv_dianpufensi_click_rt3h
+        ,sq54.user__kv_item_type_click_rt3h
+        ,sq54.user__kv_username_click_rt3h
+        ,sq54.user__kv_item_id_conversion_rt3h
+        ,sq54.user__kv_cate_id_path_conversion_rt3h
+        ,sq54.user__kv_related_goods_ids_conversion_rt3h
+        ,sq54.user__kv_brand_conversion_rt3h
+        ,sq54.user__kv_core_entity_conversion_rt3h
+        ,sq54.user__kv_first_cate_id_conversion_rt3h
+        ,sq54.user__kv_second_cate_id_conversion_rt3h
+        ,sq54.user__kv_third_cate_id_conversion_rt3h
+        ,sq54.user__kv_price_tag_conversion_rt3h
+        ,sq54.user__kv_promotion_channel_conversion_rt3h
+        ,sq54.user__kv_publish_user_conversion_rt3h
+        ,sq54.user__kv_site_conversion_rt3h
+        ,sq54.user__kv_spu_id_conversion_rt3h
+        ,sq54.user__kv_discount_intensity_conversion_rt3h
+        ,sq54.user__kv_dianpupingfen_conversion_rt3h
+        ,sq54.user__kv_pinpaidengji_conversion_rt3h
+        ,sq54.user__kv_dianpufensi_conversion_rt3h
+        ,sq54.user__kv_item_type_conversion_rt3h
+        ,sq54.user__kv_username_conversion_rt3h
+        ,sq54.user__kv_item_id_favorite_rt3h
+        ,sq54.user__kv_cate_id_path_favorite_rt3h
+        ,sq54.user__kv_related_goods_ids_favorite_rt3h
+        ,sq54.user__kv_brand_favorite_rt3h
+        ,sq54.user__kv_core_entity_favorite_rt3h
+        ,sq54.user__kv_first_cate_id_favorite_rt3h
+        ,sq54.user__kv_second_cate_id_favorite_rt3h
+        ,sq54.user__kv_third_cate_id_favorite_rt3h
+        ,sq54.user__kv_price_tag_favorite_rt3h
+        ,sq54.user__kv_promotion_channel_favorite_rt3h
+        ,sq54.user__kv_publish_user_favorite_rt3h
+        ,sq54.user__kv_site_favorite_rt3h
+        ,sq54.user__kv_spu_id_favorite_rt3h
+        ,sq54.user__kv_discount_intensity_favorite_rt3h
+        ,sq54.user__kv_dianpupingfen_favorite_rt3h
+        ,sq54.user__kv_pinpaidengji_favorite_rt3h
+        ,sq54.user__kv_dianpufensi_favorite_rt3h
+        ,sq54.user__kv_item_type_favorite_rt3h
+        ,sq54.user__kv_username_favorite_rt3h
+        ,sq54.user__kv_item_id_click_rt12h
+        ,sq54.user__kv_cate_id_path_click_rt12h
+        ,sq54.user__kv_related_goods_ids_click_rt12h
+        ,sq54.user__kv_brand_click_rt12h
+        ,sq54.user__kv_core_entity_click_rt12h
+        ,sq54.user__kv_first_cate_id_click_rt12h
+        ,sq54.user__kv_second_cate_id_click_rt12h
+        ,sq54.user__kv_third_cate_id_click_rt12h
+        ,sq54.user__kv_price_tag_click_rt12h
+        ,sq54.user__kv_promotion_channel_click_rt12h
+        ,sq54.user__kv_publish_user_click_rt12h
+        ,sq54.user__kv_site_click_rt12h
+        ,sq54.user__kv_spu_id_click_rt12h
+        ,sq54.user__kv_discount_intensity_click_rt12h
+        ,sq54.user__kv_dianpupingfen_click_rt12h
+        ,sq54.user__kv_pinpaidengji_click_rt12h
+        ,sq54.user__kv_dianpufensi_click_rt12h
+        ,sq54.user__kv_item_type_click_rt12h
+        ,sq54.user__kv_username_click_rt12h
+        ,sq54.user__kv_item_id_conversion_rt12h
+        ,sq54.user__kv_cate_id_path_conversion_rt12h
+        ,sq54.user__kv_related_goods_ids_conversion_rt12h
+        ,sq54.user__kv_brand_conversion_rt12h
+        ,sq54.user__kv_core_entity_conversion_rt12h
+        ,sq54.user__kv_first_cate_id_conversion_rt12h
+        ,sq54.user__kv_second_cate_id_conversion_rt12h
+        ,sq54.user__kv_third_cate_id_conversion_rt12h
+        ,sq54.user__kv_price_tag_conversion_rt12h
+        ,sq54.user__kv_promotion_channel_conversion_rt12h
+        ,sq54.user__kv_publish_user_conversion_rt12h
+        ,sq54.user__kv_site_conversion_rt12h
+        ,sq54.user__kv_spu_id_conversion_rt12h
+        ,sq54.user__kv_discount_intensity_conversion_rt12h
+        ,sq54.user__kv_dianpupingfen_conversion_rt12h
+        ,sq54.user__kv_pinpaidengji_conversion_rt12h
+        ,sq54.user__kv_dianpufensi_conversion_rt12h
+        ,sq54.user__kv_item_type_conversion_rt12h
+        ,sq54.user__kv_username_conversion_rt12h
+        ,sq54.user__kv_item_id_favorite_rt12h
+        ,sq54.user__kv_cate_id_path_favorite_rt12h
+        ,sq54.user__kv_related_goods_ids_favorite_rt12h
+        ,sq54.user__kv_brand_favorite_rt12h
+        ,sq54.user__kv_core_entity_favorite_rt12h
+        ,sq54.user__kv_first_cate_id_favorite_rt12h
+        ,sq54.user__kv_second_cate_id_favorite_rt12h
+        ,sq54.user__kv_third_cate_id_favorite_rt12h
+        ,sq54.user__kv_price_tag_favorite_rt12h
+        ,sq54.user__kv_promotion_channel_favorite_rt12h
+        ,sq54.user__kv_publish_user_favorite_rt12h
+        ,sq54.user__kv_site_favorite_rt12h
+        ,sq54.user__kv_spu_id_favorite_rt12h
+        ,sq54.user__kv_discount_intensity_favorite_rt12h
+        ,sq54.user__kv_dianpupingfen_favorite_rt12h
+        ,sq54.user__kv_pinpaidengji_favorite_rt12h
+        ,sq54.user__kv_dianpufensi_favorite_rt12h
+        ,sq54.user__kv_item_type_favorite_rt12h
+        ,sq54.user__kv_username_favorite_rt12h
+        ,sq54.user__kv_item_id_click_rt24h
+        ,sq54.user__kv_cate_id_path_click_rt24h
+        ,sq54.user__kv_related_goods_ids_click_rt24h
+        ,sq54.user__kv_brand_click_rt24h
+        ,sq54.user__kv_core_entity_click_rt24h
+        ,sq54.user__kv_first_cate_id_click_rt24h
+        ,sq54.user__kv_second_cate_id_click_rt24h
+        ,sq54.user__kv_third_cate_id_click_rt24h
+        ,sq54.user__kv_price_tag_click_rt24h
+        ,sq54.user__kv_promotion_channel_click_rt24h
+        ,sq54.user__kv_publish_user_click_rt24h
+        ,sq54.user__kv_site_click_rt24h
+        ,sq54.user__kv_spu_id_click_rt24h
+        ,sq54.user__kv_discount_intensity_click_rt24h
+        ,sq54.user__kv_dianpupingfen_click_rt24h
+        ,sq54.user__kv_pinpaidengji_click_rt24h
+        ,sq54.user__kv_dianpufensi_click_rt24h
+        ,sq54.user__kv_item_type_click_rt24h
+        ,sq54.user__kv_username_click_rt24h
+        ,sq54.user__kv_item_id_conversion_rt24h
+        ,sq54.user__kv_cate_id_path_conversion_rt24h
+        ,sq54.user__kv_related_goods_ids_conversion_rt24h
+        ,sq54.user__kv_brand_conversion_rt24h
+        ,sq54.user__kv_core_entity_conversion_rt24h
+        ,sq54.user__kv_first_cate_id_conversion_rt24h
+        ,sq54.user__kv_second_cate_id_conversion_rt24h
+        ,sq54.user__kv_third_cate_id_conversion_rt24h
+        ,sq54.user__kv_price_tag_conversion_rt24h
+        ,sq54.user__kv_promotion_channel_conversion_rt24h
+        ,sq54.user__kv_publish_user_conversion_rt24h
+        ,sq54.user__kv_site_conversion_rt24h
+        ,sq54.user__kv_spu_id_conversion_rt24h
+        ,sq54.user__kv_discount_intensity_conversion_rt24h
+        ,sq54.user__kv_dianpupingfen_conversion_rt24h
+        ,sq54.user__kv_pinpaidengji_conversion_rt24h
+        ,sq54.user__kv_dianpufensi_conversion_rt24h
+        ,sq54.user__kv_item_type_conversion_rt24h
+        ,sq54.user__kv_username_conversion_rt24h
+        ,sq54.user__kv_item_id_favorite_rt24h
+        ,sq54.user__kv_cate_id_path_favorite_rt24h
+        ,sq54.user__kv_related_goods_ids_favorite_rt24h
+        ,sq54.user__kv_brand_favorite_rt24h
+        ,sq54.user__kv_core_entity_favorite_rt24h
+        ,sq54.user__kv_first_cate_id_favorite_rt24h
+        ,sq54.user__kv_second_cate_id_favorite_rt24h
+        ,sq54.user__kv_third_cate_id_favorite_rt24h
+        ,sq54.user__kv_price_tag_favorite_rt24h
+        ,sq54.user__kv_promotion_channel_favorite_rt24h
+        ,sq54.user__kv_publish_user_favorite_rt24h
+        ,sq54.user__kv_site_favorite_rt24h
+        ,sq54.user__kv_spu_id_favorite_rt24h
+        ,sq54.user__kv_discount_intensity_favorite_rt24h
+        ,sq54.user__kv_dianpupingfen_favorite_rt24h
+        ,sq54.user__kv_pinpaidengji_favorite_rt24h
+        ,sq54.user__kv_dianpufensi_favorite_rt24h
+        ,sq54.user__kv_item_type_favorite_rt24h
+        ,sq54.user__kv_username_favorite_rt24h
+        ,sq56.click_10_seq__item_id
+        ,sq56.click_10_seq__cate_id_path
+        ,sq56.click_10_seq__related_goods_ids
+        ,sq56.click_10_seq__brand
+        ,sq56.click_10_seq__core_entity
+        ,sq56.click_10_seq__first_cate_id
+        ,sq56.click_10_seq__second_cate_id
+        ,sq56.click_10_seq__third_cate_id
+        ,sq56.click_10_seq__price_tag
+        ,sq56.click_10_seq__promotion_channel
+        ,sq56.click_10_seq__publish_user
+        ,sq56.click_10_seq__site
+        ,sq56.click_10_seq__spu_id
+        ,sq56.click_10_seq__discount_intensity
+        ,sq56.click_10_seq__dianpupingfen
+        ,sq56.click_10_seq__pinpaidengji
+        ,sq56.click_10_seq__dianpufensi
+        ,sq56.click_10_seq__item_type
+        ,sq56.click_10_seq__username
+        ,sq56.click_10_seq__ts
+        ,sq56.click_50_seq__item_id
+        ,sq56.click_50_seq__cate_id_path
+        ,sq56.click_50_seq__related_goods_ids
+        ,sq56.click_50_seq__brand
+        ,sq56.click_50_seq__core_entity
+        ,sq56.click_50_seq__first_cate_id
+        ,sq56.click_50_seq__second_cate_id
+        ,sq56.click_50_seq__third_cate_id
+        ,sq56.click_50_seq__price_tag
+        ,sq56.click_50_seq__promotion_channel
+        ,sq56.click_50_seq__publish_user
+        ,sq56.click_50_seq__site
+        ,sq56.click_50_seq__spu_id
+        ,sq56.click_50_seq__discount_intensity
+        ,sq56.click_50_seq__dianpupingfen
+        ,sq56.click_50_seq__pinpaidengji
+        ,sq56.click_50_seq__dianpufensi
+        ,sq56.click_50_seq__item_type
+        ,sq56.click_50_seq__username
+        ,sq56.click_50_seq__ts
+        ,sq56.conversion_5_seq__item_id
+        ,sq56.conversion_5_seq__cate_id_path
+        ,sq56.conversion_5_seq__related_goods_ids
+        ,sq56.conversion_5_seq__brand
+        ,sq56.conversion_5_seq__core_entity
+        ,sq56.conversion_5_seq__first_cate_id
+        ,sq56.conversion_5_seq__second_cate_id
+        ,sq56.conversion_5_seq__third_cate_id
+        ,sq56.conversion_5_seq__price_tag
+        ,sq56.conversion_5_seq__promotion_channel
+        ,sq56.conversion_5_seq__publish_user
+        ,sq56.conversion_5_seq__site
+        ,sq56.conversion_5_seq__spu_id
+        ,sq56.conversion_5_seq__discount_intensity
+        ,sq56.conversion_5_seq__dianpupingfen
+        ,sq56.conversion_5_seq__pinpaidengji
+        ,sq56.conversion_5_seq__dianpufensi
+        ,sq56.conversion_5_seq__item_type
+        ,sq56.conversion_5_seq__username
+        ,sq56.conversion_5_seq__ts
+        ,sq56.conversion_20_seq__item_id
+        ,sq56.conversion_20_seq__cate_id_path
+        ,sq56.conversion_20_seq__related_goods_ids
+        ,sq56.conversion_20_seq__brand
+        ,sq56.conversion_20_seq__core_entity
+        ,sq56.conversion_20_seq__first_cate_id
+        ,sq56.conversion_20_seq__second_cate_id
+        ,sq56.conversion_20_seq__third_cate_id
+        ,sq56.conversion_20_seq__price_tag
+        ,sq56.conversion_20_seq__promotion_channel
+        ,sq56.conversion_20_seq__publish_user
+        ,sq56.conversion_20_seq__site
+        ,sq56.conversion_20_seq__spu_id
+        ,sq56.conversion_20_seq__discount_intensity
+        ,sq56.conversion_20_seq__dianpupingfen
+        ,sq56.conversion_20_seq__pinpaidengji
+        ,sq56.conversion_20_seq__dianpufensi
+        ,sq56.conversion_20_seq__item_type
+        ,sq56.conversion_20_seq__username
+        ,sq56.conversion_20_seq__ts
+        ,sq56.favorite_5_seq__item_id
+        ,sq56.favorite_5_seq__cate_id_path
+        ,sq56.favorite_5_seq__related_goods_ids
+        ,sq56.favorite_5_seq__brand
+        ,sq56.favorite_5_seq__core_entity
+        ,sq56.favorite_5_seq__first_cate_id
+        ,sq56.favorite_5_seq__second_cate_id
+        ,sq56.favorite_5_seq__third_cate_id
+        ,sq56.favorite_5_seq__price_tag
+        ,sq56.favorite_5_seq__promotion_channel
+        ,sq56.favorite_5_seq__publish_user
+        ,sq56.favorite_5_seq__site
+        ,sq56.favorite_5_seq__spu_id
+        ,sq56.favorite_5_seq__discount_intensity
+        ,sq56.favorite_5_seq__dianpupingfen
+        ,sq56.favorite_5_seq__pinpaidengji
+        ,sq56.favorite_5_seq__dianpufensi
+        ,sq56.favorite_5_seq__item_type
+        ,sq56.favorite_5_seq__username
+        ,sq56.favorite_5_seq__ts
+        ,sq56.favorite_10_seq__item_id
+        ,sq56.favorite_10_seq__cate_id_path
+        ,sq56.favorite_10_seq__related_goods_ids
+        ,sq56.favorite_10_seq__brand
+        ,sq56.favorite_10_seq__core_entity
+        ,sq56.favorite_10_seq__first_cate_id
+        ,sq56.favorite_10_seq__second_cate_id
+        ,sq56.favorite_10_seq__third_cate_id
+        ,sq56.favorite_10_seq__price_tag
+        ,sq56.favorite_10_seq__promotion_channel
+        ,sq56.favorite_10_seq__publish_user
+        ,sq56.favorite_10_seq__site
+        ,sq56.favorite_10_seq__spu_id
+        ,sq56.favorite_10_seq__discount_intensity
+        ,sq56.favorite_10_seq__dianpupingfen
+        ,sq56.favorite_10_seq__pinpaidengji
+        ,sq56.favorite_10_seq__dianpufensi
+        ,sq56.favorite_10_seq__item_type
+        ,sq56.favorite_10_seq__username
+        ,sq56.favorite_10_seq__ts
+        ,round((sq0.event_unix_time - sq55.pub_time) / 3600.0,2) AS pub_hours
+        ,round(
+              IF(sq33.reg_time IS NULL OR sq33.reg_time = '',0.0,(sq0.event_unix_time - UNIX_TIMESTAMP(SPLIT(sq33.reg_time,' ')[0],'yyyy-MM-dd')) / 3600 / 24.0)
+        ,2) AS reg_days
+        ,TAG_COMBO(sq55.brand,sq55.price_tag) AS brand_x_price_tag
+        ,TAG_COMBO(sq55.brand,sq55.cate_id_path) AS brand_x_cate_id_path
+        ,TAG_COMBO(sq55.brand,sq33.gender) AS brand_x_gender
+        ,TAG_COMBO(sq55.brand,sq33.age_group) AS brand_x_age_group
+        ,TAG_COMBO(sq55.cate_id_path,sq33.gender) AS cate_id_path_x_gender
+        ,TAG_COMBO(sq55.cate_id_path,sq33.age_group) AS cate_id_path_x_age_group
+        ,sq33_1.bhv_gender
+        ,sq33_1.cate_prefer
+        ,sq33_1.crowd_prefer
+        ,sq33_1.bhv_time
+        ,sq33_1.consume_power
+        ,sq33_1.price_prefer
+        ,sq33_1.city_level
+        ,sq33_1.city_region
+        ,sq33_1.site_prefer
+        ,sq33_1.active_days
+        ,sq33_1.active_bhv
+        ,sq55_1.shop_type
+        ,sq55_1.shop_subtype
+        ,sq55_1.comment_tag
+        ,sq55_1.sales_month_tag
+        ,sq55_1.top_tag
+        ,sq55_1.item_class_prefer
+        ,sq55_1.item_audience_prefer
+        ,sq55_1.item_gender_prefer
+        ,sq55_1.potential_score
+        ,sq55_1.srh_hot
+        ,sq55_1.price_drop_freq
+        ,sq55_1.item_comment_tag
+        ,sq55_1.shop_life_time
+        ,sq55_1.his_high_level
+        ,CASE
+        WHEN sq0.scene IS NOT NULL AND size(split(sq0.scene, '#')) > 1
+        THEN split(sq0.scene, '#')[1]
+        ELSE NULL
+        END AS f_req_page
+        ,CASE
+        WHEN sq0.scene IS NOT NULL AND size(split(sq0.scene, '#')) > 1
+        THEN split(sq0.scene, '#')[2]
+        ELSE NULL
+        END AS f_req_domain
+FROM    (
+            SELECT  *
+            FROM    home_flow_2604_ctrcvr_sorter_label_table_v1
+            WHERE   dt = '${bdp.system.bizdate}'
+        ) sq0
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_ads_usr_user_basic_info_preprocess_v1
+                WHERE   dt = '${bdp.system.bizdate}'
+            ) sq33
+ON      sq0.mmb_id = sq33.mmb_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_item_id_rt_statistic_feat_v1
+                WHERE   dt = '${bdp.system.bizdate}'
+            ) sq30
+ON      sq0.item_id = sq30.item_id
+AND     sq0.request_id = sq30.request_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_mmb_id_rt_statistic_feat_v1
+                WHERE   dt = '${bdp.system.bizdate}'
+            ) sq54
+ON      sq0.mmb_id = sq54.mmb_id
+AND     sq0.request_id = sq54.request_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_mmb_id_all_seq_feat_v1
+                WHERE   dt = '${bdp.system.bizdate}'
+            ) sq56
+ON      sq0.mmb_id = sq56.mmb_id
+AND     sq0.request_id = sq56.request_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_mmb_id_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq45
+ON      sq0.mmb_id = sq45.mmb_id
+LEFT JOIN   (
+                SELECT  *
+                        ,ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY fs_write_time ) AS write_order
+                FROM    feature_mall_feed_rec_flow_item_title_embedding_v4_offline
+                WHERE   dt >= '20251120' -- TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-90,'dd'),'yyyymmdd')
+                AND     title_vector IS NOT NULL
+            ) sq1
+ON      sq0.item_id = sq1.item_id
+AND     sq1.write_order = 1
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_item_id_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq14
+ON      sq0.item_id = sq14.item_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_item_id_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq15
+ON      sq0.item_id = sq15.item_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_item_id_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq43
+ON      sq0.item_id = sq43.item_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_ads_log_zhekou_rec_item_basic_info_preprocess_v1
+                WHERE   dt = '${bdp.system.bizdate}'
+            ) sq55
+ON      sq0.item_id = sq55.item_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_spu_id_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq28
+ON      sq55.spu_id = sq28.spu_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_spu_id_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq29
+ON      sq55.spu_id = sq29.spu_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_spu_id_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq52
+ON      sq55.spu_id = sq52.spu_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_brand_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq2
+ON      sq55.brand = sq2.brand
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_core_entity_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq6
+ON      sq55.core_entity = sq6.core_entity
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_brand_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq3
+ON      sq55.brand = sq3.brand
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_brand_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq35
+ON      sq55.brand = sq35.brand
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_core_entity_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq7
+ON      sq55.core_entity = sq7.core_entity
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_core_entity_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq37
+ON      sq55.core_entity = sq37.core_entity
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_username_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq31
+ON      sq55.username = sq31.username
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_username_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq32
+ON      sq55.username = sq32.username
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_username_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq53
+ON      sq55.username = sq53.username
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_cate_id_path_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq4
+ON      sq55.cate_id_path = sq4.cate_id_path
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_cate_id_path_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq5
+ON      sq55.cate_id_path = sq5.cate_id_path
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_cate_id_path_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq36
+ON      sq55.cate_id_path = sq36.cate_id_path
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_age_group_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq34
+ON      sq33.age_group = sq34.age_group
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_login_city_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq44
+ON      sq33.login_city = sq44.login_city
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_dev_brand_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq38
+ON      sq33.dev_brand = sq38.dev_brand
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_publish_user_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq22
+ON      sq55.publish_user = sq22.publish_user
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_publish_user_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq23
+ON      sq55.publish_user = sq23.publish_user
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_publish_user_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq49
+ON      sq55.publish_user = sq49.publish_user
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_second_cate_id_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq24
+ON      sq55.second_cate_id = sq24.second_cate_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_second_cate_id_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq25
+ON      sq55.second_cate_id = sq25.second_cate_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_second_cate_id_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq50
+ON      sq55.second_cate_id = sq50.second_cate_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_site_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq26
+ON      sq55.site = sq26.site
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_site_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq27
+ON      sq55.site = sq27.site
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_site_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq51
+ON      sq55.site = sq51.site
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_price_tag_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq18
+ON      sq55.price_tag = sq18.price_tag
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_first_cate_id_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq12
+ON      sq55.first_cate_id = sq12.first_cate_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_first_cate_id_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq41
+ON      sq55.first_cate_id = sq41.first_cate_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_first_cate_id_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq13
+ON      sq55.first_cate_id = sq13.first_cate_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_price_tag_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq47
+ON      sq55.price_tag = sq47.price_tag
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_price_tag_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq19
+ON      sq55.price_tag = sq19.price_tag
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_discount_intensity_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq40
+ON      sq55.discount_intensity = sq40.discount_intensity
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_discount_intensity_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq11
+ON      sq55.discount_intensity = sq11.discount_intensity
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_discount_intensity_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq10
+ON      sq55.discount_intensity = sq10.discount_intensity
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_promotion_channel_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq20
+ON      sq55.promotion_channel = sq20.promotion_channel
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_dianpupingfen_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq8
+ON      sq55.dianpupingfen = sq8.dianpupingfen
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_promotion_channel_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq21
+ON      sq55.promotion_channel = sq21.promotion_channel
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_dianpupingfen_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq39
+ON      sq55.dianpupingfen = sq39.dianpupingfen
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_promotion_channel_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq48
+ON      sq55.promotion_channel = sq48.promotion_channel
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_dianpupingfen_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq9
+ON      sq55.dianpupingfen = sq9.dianpupingfen
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_pinpaidengji_static_feat_3d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq17
+ON      sq55.pinpaidengji = sq17.pinpaidengji
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_pinpaidengji_static_feat_1d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq46
+ON      sq55.pinpaidengji = sq46.pinpaidengji
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_pinpaidengji_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq16
+ON      sq55.pinpaidengji = sq16.pinpaidengji
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_gender_static_feat_15d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq42
+ON      sq33.gender = sq42.gender
+LEFT JOIN   (
+                SELECT  `(dt)?+.+`
+                FROM    home_flow_2604_ads_usr_user_tag_info_preprocess_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq33_1
+ON      sq0.mmb_id = sq33_1.mmb_id
+LEFT JOIN   (
+                SELECT  `(dt)?+.+`
+                FROM    home_flow_2604_ads_log_zhekou_rec_item_tag_info_preprocess_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+                -- WHERE dt = '20260512'
+            ) sq55_1
+ON      sq0.item_id = sq55_1.item_id
+;

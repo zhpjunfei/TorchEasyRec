@@ -172,6 +172,13 @@ def _evaluate(
     """Evaluate the model."""
     is_rank_zero = int(os.environ.get("RANK", 0)) == 0
     is_local_rank_zero = int(os.environ.get("LOCAL_RANK", 0)) == 0
+    if torch.cuda.is_available():
+        eval_seed = int(os.environ.get("EVAL_SEED", "0"))
+        if eval_seed > 0:
+            torch.manual_seed(eval_seed)
+            torch.cuda.manual_seed_all(eval_seed)
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
     model.eval()
     pipeline = create_train_pipeline(
         model, check_all_workers_data_status=check_all_workers_data_status

@@ -1,0 +1,198 @@
+{
+  "main": {
+    "id": "83aac1d38ec605ef",
+    "type": "split",
+    "children": [
+      {
+        "id": "b06356b69e340780",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "71eda8bf316850a2",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "20-experiments/t-max-correction.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "t-max-correction"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "152558edb89d6d20",
+    "type": "split",
+    "children": [
+      {
+        "id": "ed8149d25e0f2ba7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "12395c6cbce6a0b6",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "259b7b5d5446b0a6",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "卡",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "3cc4894de909e80c",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ],
+        "currentTab": 1
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "05042980cf9a5bcd",
+    "type": "split",
+    "children": [
+      {
+        "id": "e194da6085aa2fbf",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "1a8c86506d458a32",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "20-experiments/t-max-correction.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "t-max-correction 的反向链接列表"
+            }
+          },
+          {
+            "id": "16f7ca03ce2d7dbf",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "20-experiments/t-max-correction.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "t-max-correction 的出链列表"
+            }
+          },
+          {
+            "id": "5d3421b9afbc0df3",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "d6f34f2020762776",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "c0dbb7c16567ac51",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "20-experiments/t-max-correction.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "t-max-correction 的大纲"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false
+    }
+  },
+  "active": "71eda8bf316850a2",
+  "lastOpenFiles": [
+    "00-index/测试文件.md",
+    "20-experiments/v6-design-matrix.md",
+    "20-experiments/5run-noise-investigation.md",
+    "00-index/decisions-log.md",
+    "40-errors/error-2-constant-lr.md",
+    "00-index/README.md",
+    "10-architecture/pepnet-dcn-ple.md",
+    "10-architecture/pepnet-v2.md"
+  ]
+}
