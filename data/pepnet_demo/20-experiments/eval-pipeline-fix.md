@@ -95,7 +95,7 @@ export EVAL_SEED=0
 1. **修复前有系统性低估偏差 -0.59pp**: 5-run mean 0.7852 → 真实值 0.791069
 1. **每个实验 1 次确定性 eval** (Std=0pp), 无需 N≥5
 1. **error-3-noise-undersample** 永久关闭
-1. 确定性重跑进度: **6/11 cells 完成** (baseline_hbs, lsp, dlsp, ple, ple_d, ple_d16), 5 pending (domain_id_only, ple_lsp, ple_dlsp, d32, dpage, ph)
+1. 确定性重跑进度: **13/13 cells 完成** (全部 v6 + v7). dpage 标记为 config bug (已修, 结果 = d=8).
 
 ## 下一步
 

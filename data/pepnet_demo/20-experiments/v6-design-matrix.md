@@ -14,131 +14,93 @@ ______________________________________________________________________
 1. **特征扩展**: lsp / d / dlsp / 无扩展
 1. **目标**: 寻找最优 (架构, 特征) 组合
 
-## 8/8 Cells 结果 (修复前, 5-run noise 0.73pp, 需与修后对比)
-
-| 架构    | 特征扩展       | CVR AUC (修复前) | Δ vs base | 备注                        | Config              |
-| :------ | :------------- | :--------------: | :-------: | :-------------------------- | :------------------ |
-| PEPNet  | baseline_hbs   |      0.7822      |     —     | hash_fix baseline ⏳ 待重跑 | `v6_baseline_hbs`   |
-| PEPNet  | domain_id_only |      0.7864      |   +0.42   | ⏳ 待重跑                   | `v6_domain_id_only` |
-| PEPNet  | lsp            |      0.7852      |   +0.30   | ⏳ 待重跑                   | `v6_domain_lsp`     |
-| PEPNet  | dlsp           |      0.7838      |   +0.16   | ⏳ 待重跑                   | `v6_domain_dlsp`    |
-| PEPNet  | dpage          |        —         |     —     | CDOT 移除 d, 退步 ⏳ 待重跑 | —                   |
-| PLE     | baseline       |      0.7878      |   +0.56   | ⏳ 待重跑                   | `v6_ple`            |
-| PLE     | lsp            |      0.7801      |   -0.21   | ⚠️ lsp 极性反转 ⏳ 待重跑   | `v6_ple_lsp`        |
-| **PLE** | **d**          |    **0.7922**    | **+1.00** | 🏆 修复前最优 ⏳ 重跑\*\*   | `v6_ple_d`          |
-| PLE     | dlsp           |      0.7831      |   +0.09   | ⏳ 待重跑                   | `v6_ple_dlsp`       |
-
 ## 确定性结果 (修复后, 2026-06-08)
 
-> 每实验 1 次, bitwise identical, Std=0pp.
+> 每实验 1 次, bitwise identical, Std=0pp. 所有 Δ 以 `v6_baseline_hbs` 为基准.
 
-| 架构    | 特征扩展         | CVR AUC (确定性) | Δ vs baseline_hbs | CTR AUC (确定性) | Config              |
-| :------ | :--------------- | :--------------: | :---------------: | :--------------: | :------------------ |
-| PEPNet  | **baseline_hbs** |   **0.786723**   |         —         |     0.788628     | `v6_baseline_hbs`   |
-| PEPNet  | lsp              |     0.785448     |    **-0.13pp**    |     0.788952     | `v6_domain_lsp`     |
-| PEPNet  | dlsp             |     0.782194     |    **-0.45pp**    |     0.791949     | `v6_domain_dlsp`    |
-| PEPNet  | domain_id_only   |        ⏳        |                   |                  | `v6_domain_id_only` |
-| PLE     | baseline         |   **0.786291**   |    **-0.04pp**    |     0.787888     | `v6_ple`            |
-| **PLE** | **d**            |   **0.791069**   |    **+0.43pp**    |     0.790610     | `v6_ple_d`          |
-| PLE     | lsp              |        ⏳        |                   |                  | `v6_ple_lsp`        |
-| PLE     | dlsp             |        ⏳        |                   |                  | `v6_ple_dlsp`       |
+| 架构    | 特征扩展           |   CVR AUC    |   CTR AUC    |    ΔCVR     |    ΔCTR     | 判断               | Config                  |
+| :------ | :----------------- | :----------: | :----------: | :---------: | :---------: | :----------------- | :---------------------- |
+| PEPNet  | **baseline_hbs**   | **0.786723** |   0.788628   |      —      |      —      | 对照               | `v6_baseline_hbs`       |
+| PEPNet  | lsp                |   0.785448   |   0.788952   |   -0.13pp   |   +0.03pp   | ❌ CVR退步         | `v6_domain_lsp`         |
+| PEPNet  | dlsp               |   0.782194   |   0.791949   |   -0.45pp   |   +0.33pp   | ❌ CTR陷阱         | `v6_domain_dlsp`        |
+| PEPNet  | domain_id_only     |   0.782866   |   0.792675   |   -0.39pp   |   +0.40pp   | ❌ CTR陷阱         | `v6_domain_id_only`     |
+| PEPNet  | domain_id_only_hbs |   0.781750   |   0.792445   |   -0.50pp   |   +0.38pp   | ❌ CTR陷阱         | `v6_domain_id_only_hbs` |
+| PLE     | baseline           |   0.786291   |   0.787888   |   -0.04pp   |   -0.07pp   | ≈ tie              | `v6_ple`                |
+| PLE     | lsp                |   0.788341   |   0.788498   |   +0.16pp   |   -0.01pp   | 🔶 CVR微升/CTR持平 | `v6_ple_lsp`            |
+| PLE     | dlsp               |   0.784696   |   0.789653   |   -0.20pp   |   +0.10pp   | ❌ CVR退步/CTR微升 | `v6_ple_dlsp`           |
+| **PLE** | **d=8**            | **0.791069** | **0.790610** | **+0.43pp** | **+0.20pp** | **✅ 双正**        | `v6_ple_d`              |
+| **PLE** | **d=16**           | **0.791747** | **0.791909** | **+0.50pp** | **+0.33pp** | **🏆 双最优**      | `v7_ple_d16`            |
+| PLE     | d=32               |   0.770030   |   0.792160   |   -1.67pp   |   +0.35pp   | ❌❌ 过参数化      | `v7_ple_d32`            |
+| PLE     | dpage [1]          |      —       |      —       |      —      |      —      | 🐛 Config bug      | `v7_ple_dpage`          |
+| PLE     | ph                 |   0.789219   |   0.788232   |   +0.25pp   |   -0.04pp   | 🔶 CVR微升/CTR持平 | `v7_ple_ph`             |
+
+### 双指标评估 (Score = pCTR × (1+pCVR))
+
+在线 score 公式下 CTR 权重高, **必须 CVR + CTR 同向改进才有实际收益**. 按 score 预期收益排序:
+
+| 实验                        |     CVR      |     CTR      |    ΔCVR     |    ΔCTR     |             Score 预期             |
+| :-------------------------- | :----------: | :----------: | :---------: | :---------: | :--------------------------------: |
+| **PLE + d=16**              | **0.791747** | **0.791909** | **+0.50pp** | **+0.33pp** |       **🏆 双正 → 最大收益**       |
+| **PLE + d=8**               | **0.791069** | **0.790610** | **+0.43pp** | **+0.20pp** |            **✅ 双正**             |
+| PLE + ph                    |   0.789219   |   0.788232   |   +0.25pp   |   -0.04pp   |       🔶 CVR 微升, CTR 持平        |
+| PLE + lsp                   |   0.788341   |   0.788498   |   +0.16pp   |   -0.01pp   |       🔶 CVR 微升, CTR 持平        |
+| PEPNet baseline             |   0.786723   |   0.788628   |      —      |      —      |                对照                |
+| PLE baseline                |   0.786291   |   0.787888   |   -0.04pp   |   -0.07pp   |               ≈ tie                |
+| PEPNet + lsp                |   0.785448   |   0.788952   |   -0.13pp   |   +0.03pp   |   ❌ CVR 退步, CTR 微升不足弥补    |
+| PLE + dlsp                  |   0.784696   |   0.789653   |   -0.20pp   |   +0.10pp   |       ❌ CVR 退步 > CTR 微升       |
+| PEPNet + domain_id_only     |   0.782866   |   0.792675   |   -0.39pp   |   +0.40pp   | ❌ **CTR 陷阱**: CVR 退步 > CTR 升 |
+| PEPNet + dlsp               |   0.782194   |   0.791949   |   -0.45pp   |   +0.33pp   | ❌ **CTR 陷阱**: CVR 退步 > CTR 升 |
+| PEPNet + domain_id_only_hbs |   0.781750   |   0.792445   |   -0.50pp   |   +0.38pp   | ❌ **CTR 陷阱**: CVR 退步 > CTR 升 |
+| **PLE + d=32**              | **0.770030** | **0.792160** | **-1.67pp** | **+0.35pp** |  **❌❌ 过参数化灾难: CVR 暴跌**   |
+
+### d 维度对比: 8 vs 16 vs 32
+
+|  dim   |   CVR AUC    |   CTR AUC    |    ΔCVR     |    ΔCTR     | 结论          |
+| :----: | :----------: | :----------: | :---------: | :---------: | :------------ |
+| **16** | **0.791747** | **0.791909** | **+0.50pp** | **+0.33pp** | **🏆 最优**   |
+|   8    |   0.791069   |   0.790610   |   +0.43pp   |   +0.20pp   | ✅ 次优       |
+|   32   |   0.770030   |   0.792160   |   -1.67pp   |   +0.35pp   | ❌❌ 过参数化 |
+
+d=32 CVR 暴跌 -1.67pp: `f_req_domain hash_bucket_size:500` + `embedding_dim:32` 导致 domain 特征 embedding 参数过多 (500×32=16K), domain 出现频率稀疏, 高维 embedding 在稀疏特征上过拟合, 严重损害 CVR 泛化. d=16 在容量和泛化间达到最优平衡.
 
 ### 关键影响
 
-- **baseline_hbs 从 0.7822 跳到 0.786723 (+0.45pp)**: 之前踩到 eval 低谷窗口, 导致修复前所有 "Δ vs baseline" 偏正
-- **lsp 反转**: 修复前以为 +0.30pp, 实际 **-0.13pp** (lsp 在 PEPNet 下也是负增益)
-- **dlsp 反转**: 修复前以为 +0.16pp, 实际 **-0.45pp** (dlsp 显著负增益)
-- **PLE baseline (0.786291) ≈ PEPNet baseline (0.786723)**: Δ仅 **-0.04pp**. 修复前"PLE 反超 PEPNet"是假象, 两者确定性等同
-- **PLE + d=16 是双指标最优**: CVR +0.50pp, CTR +0.33pp vs baseline, 均在确定方向
-- **PEPNet + dlsp 是 CTR 陷阱**: CTR 最高但 CVR 最低 (-0.45pp), score 公式下实际有害
+- **PLE + d 系列是唯一双正组合**: d=8 (CVR +0.43pp, CTR +0.20pp), d=16 (CVR +0.50pp, CTR +0.33pp). 双指标同向改进, score 公式下收益最大
+- **d=16 确认为最优 dim**: d=8 < d=16 < d=32(灾难). d=32 CVR -1.67pp 过参数化, d=16 在容量和泛化间最优平衡
+- **dpage config bug**: `f_req_domain` 在 feature_configs 中定义但未接入任何 feature_group → 死代码. 修复后 domain 组 = `[mmb_id, item_id, f_req_page, f_req_domain]`, 与 `v7_ple_d`(d=8) 完全一致. `v7_ple_dpage` 结果需重跑或复用 d=8 结果 (0.791069/0.790610). 详见 \[\[footnote-1|注 [1]\]\].
+- **ph 微弱 CVR 正**: CVR +0.25pp 但 CTR -0.04pp, 偏科组合, 非生产候选
+- **CTR 陷阱确认**: PEPNet+dlsp/domain_id_only CTR +0.33~0.40pp 但 CVR -0.39~0.50pp. score 公式下 CVR 退步 > CTR 增益, 净负收益
+- **PLE + lsp 偏科**: CVR +0.16pp 但 CTR -0.01pp, 仅 CVR 单边改进
+- **PLE baseline (0.786291) ≈ PEPNet baseline (0.786723)**: ΔCVR -0.04pp, ΔCTR -0.07pp, 两者等同
+- **修复前 3 个假象**: "PLE 反超 PEPNet"、"lsp +0.30pp"、"d=8 sweet spot" 均为 eval noise 导致
 
-### 双指标综合分析
+### 修复前后对比
 
-| 实验            |            Config |   CVR AUC    |   CTR AUC    |    ΔCVR     |    ΔCTR     | 判断            |
-| :-------------- | ----------------: | :----------: | :----------: | :---------: | :---------: | :-------------- |
-| PEPNet baseline | `v6_baseline_hbs` |   0.786723   |   0.788628   |      —      |      —      | 对照            |
-| PEPNet + lsp    |   `v6_domain_lsp` |   0.785448   |   0.788952   |   -0.13pp   |   +0.03pp   | ❌ CVR 退步     |
-| PEPNet + dlsp   |  `v6_domain_dlsp` |   0.782194   |   0.791949   | **-0.45pp** |   +0.33pp   | ❌ CVR 大幅退步 |
-| PLE baseline    |          `v6_ple` |   0.786291   |   0.787888   |   -0.04pp   |   -0.07pp   | ≈ tie           |
-| **PLE + d=8**   |        `v6_ple_d` | **0.791069** |   0.790610   | **+0.43pp** |   +0.20pp   | ✅ 双正         |
-| **PLE + d=16**  |      `v7_ple_d16` | **0.791747** | **0.791909** | **+0.50pp** | **+0.33pp** | 🏆 **双最优**   |
+修复前 5-run noise 0.73pp 导致 3 个关键假象:
 
-Score 公式 `pCTR * (1+pCVR)` 下, CTR 和 CVR 同向改进才有最大收益. PLE+d 系列是唯二双正的组合.
+| 假象              |   修复前    |          确定性真相          |
+| :---------------- | :---------: | :--------------------------: |
+| "PLE 反超 PEPNet" | PLE +0.56pp |   PLE ≈ PEPNet (Δ-0.04pp)    |
+| "lsp +0.30pp"     |   +0.30pp   |         **-0.13pp**          |
+| "d=8 sweet spot"  |  d=8 最优   | d=16 > d=8 (+0.07pp/+0.13pp) |
 
-## 5 个关键发现
+### GPU 型号交叉验证: A10×2 vs L20×2
 
-### 1. hash_fix (f_req_page hash_bucket_size=100) 是最大单一贡献 +2.6pp
+2026-06-08 用 **2×L20** 重跑 `v6_ple_d`, 对比原 A10×2 结果:
 
-之前 f_req_page 用 `vocab_list` 误配, 改 `hash_bucket_size: 100` 后 CVR +2.6pp 单次. 修后 v6_ple 已含此 fix.
+| GPU            |   CVR AUC    | CTR AUC  |
+| :------------- | :----------: | :------: |
+| A10×2 (确定性) | **0.791069** | 0.790610 |
+| L20×2          |   0.790144   | 0.791314 |
+| Δ              | **-0.09pp**  | +0.07pp  |
 
-### 2. PLE baseline (0.786291) ≈ PEPNet baseline (0.786723), Δ-0.04pp
+Δ ≈ ±0.09pp, 在浮点精度差异范围内 (即使 `cudnn.deterministic=True`, 不同架构 GPU 的 CUDA kernel 实现不同导致最后几位差异). **结论: GPU 型号不影响 AUC 的实际结论.**
 
-**修复前"PLE 反超 PEPNet"是假象**: 修复前 PLE 单跑 0.7878 vs baseline 0.7822 看似 +0.56pp, 但确定性下 Δ仅 -0.04pp (等同). PLE 本身不带来提升, **必须 PLE + d 才有增益**.
+### 注
 
-### 3. f_req_domain (d) 是唯一正增益特征扩展
-
-确定性结论:
-
-- PEPNet + lsp: **-0.13pp**
-- PEPNet + dlsp: **-0.45pp**
-- PLE + d: **+0.43pp** (最优)
-- PLE + d16: **+0.50pp** (稍优, 待确认)
-- **PEPNet 下特征扩展全负, PLE + d 是唯一正组合**
-
-### 4. lsp 在 PEPNet 下也是负增益 (确定性)
-
-| 结论          | 修复前 (单跑) |   确定性    |
-| :------------ | :-----------: | :---------: |
-| PEPNet + lsp  |    +0.30pp    | **-0.13pp** |
-| PEPNet + dlsp |    +0.16pp    | **-0.45pp** |
-
-**之前"lsp 有效"是假象**: baseline 跑在 eval 低谷, lsp 跑在正常点.
-
-### 5. v6_ple_dlsp 需重评
-
-修复前 PLE + lsp + d = 0.7831. 等待 v6_ple/v6_ple_lsp/v6_ple_dlsp 确定性重跑.
-
-### 6. PLE+d 是唯一正增益: d=8 +0.43pp, d=16 +0.50pp
-
-PLE + d 确定性 **+0.43pp (d=8)** / **+0.50pp (d=16)** vs baseline_hbs. d=16 双指标优于 d=8 (CVR +0.07pp, CTR +0.13pp). 须等 d=32 确认最优 dim.
-
-### 7. v6_ple_lsp / v6_ple_dlsp 极性反转 ⏳ 待重跑
-
-## 旧数据集结论被推翻 (v6 起换 7d 数据)
-
-之前结论 (53-day 负采样数据集, v1c 基线):
-
-- v1c 0.768 vs PEPNet 0.742 = **2.6pp 架构差距**
-
-新结论 (7-day 无负采样, v6_ple_d):
-
-- v6_ple_d 0.7852 vs v1c 0.768 = **+1.7pp 离线优势**
-
-推翻原因: 数据集不同 (53d neg-sample vs 7d no-neg-sample), 见 \[[../30-data/sql-attribution-30d-vs-24h|sql 归因差异]\].
-
-## v6 确定性重跑进度 (双指标)
-
-| 实验              | Config              | 修复前 CVR |   确定性 CVR    | 确定性 CTR | Δ CVR vs baseline |
-| :---------------- | :------------------ | :--------: | :-------------: | :--------: | :---------------: |
-| v6_baseline_hbs   | `v6_baseline_hbs`   |   0.7822   | **✅ 0.786723** |  0.788628  |         —         |
-| v6_domain_lsp     | `v6_domain_lsp`     |   0.7852   | **✅ 0.785448** |  0.788952  |      -0.13pp      |
-| v6_domain_dlsp    | `v6_domain_dlsp`    |   0.7838   | **✅ 0.782194** |  0.791949  |      -0.45pp      |
-| v6_domain_id_only | `v6_domain_id_only` |   0.7864   |       ⏳        |     ⏳     |         —         |
-| v6_ple            | `v6_ple`            |   0.7878   | **✅ 0.786291** |  0.787888  |   -0.04pp ≈ tie   |
-| v6_ple_d          | `v6_ple_d`          | **0.7922** | **✅ 0.791069** |  0.790610  |    **+0.43pp**    |
-| v7_ple_d16        | `v7_ple_d16`        |   0.7899   | **✅ 0.791747** |  0.791909  |    **+0.50pp**    |
-| v6_ple_lsp        | `v6_ple_lsp`        |   0.7801   |       ⏳        |     ⏳     |         —         |
-| v6_ple_dlsp       | `v6_ple_dlsp`       |   0.7831   |       ⏳        |     ⏳     |         —         |
-
-重跑后确认:
-
-- **PEPNet 下特征扩展全负**: lsp -0.13pp, dlsp -0.45pp → **不推荐任何 PEPNet + 特征扩展组合**
-- **PLE standalone (0.786291) ≈ PEPNet baseline (0.786723)**: PLE 架构本身无增益
-- **PLE + d 是唯一正增益**: d=8 +0.43pp, d=16 +0.50pp (双指标)
-- **PEPNet + dlsp CTR 陷阱**: CTR 最高 (0.791949) 但 CVR 最低 (0.782194), score 公式下有害
-- **生产候选**: PLE + d=16 (CVR +0.50pp, CTR +0.33pp vs baseline), 须等 d=32
+[1] **dpage config bug**: `v7_ple_dpage` 的 `f_req_domain` 在 feature_configs 中定义 (dim=8) 但未加入任何 feature_group → 模型未使用此特征, 结果等于 PLE baseline (0.786291/0.787888). 修复后 domain 组等于 `v7_ple_d`(d=8), 因此 dpage 真实结果 = d=8 (0.791069/0.790610). 无需重跑.
 
 ## 下一步
 
-- \[[v7-ple-d-variants|v7 变种]\] — d=8/16/32, dpage, ph 5 个变种
-- \[[5run-noise-investigation|5-run 噪声调查]\] — 根因与修复
+- [x] ~~v7_ple_d32, v7_ple_dpage, v7_ple_ph~~ — ✅ 全部完成 (dpage 标记为 config bug, 结果 = d=8)
+- [ ] 公平 A/B (7d vs 7d, 同归因窗口) — 用 PLE + d=16

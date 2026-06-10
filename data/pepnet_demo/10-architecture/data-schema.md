@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-06-07 tags: [architecture, data, schema, features] related: \["\[[pepnet-dcn-ple]\]"\]
+## date: 2026-06-07 tags: [architecture, data, schema, features] related: \[[pepnet-dcn-ple]\]
 
 # Data Schema — 特征体系
 

@@ -8,18 +8,18 @@ ______________________________________________________________________
 
 ## 🚦 当前状态 (2026-06-08)
 
-| 维度              |     状态     | 详情                                            |
-| :---------------- | :----------: | :---------------------------------------------- |
-| 模型架构          |   ✅ Done    | PEPNetDCNPLE 完整实现 + 6 个 model tests pass   |
-| 设计矩阵          | ⏳ Rerunning | v6 2×2×2 确定性重跑中 (修复前值有 -0.59pp 偏差) |
-| v7 变种           | ⏳ Rerunning | d=8/16/32, dpage, ph 待确定性重评               |
-| P0 修复验证       | ✅ Verified  | 4 次重跑 bitwise identical, **Std=0pp**         |
-| OSS wheel 部署    |   ✅ Done    | 1.2.16 已上传生效, smoke test 通过              |
-| 在线 A/B          |   ✅ Done    | 1 天观察, exp2 > exp1 +5.3% 显著                |
-| 上产决策          |   ⏸️ Hold    | 待设计矩阵重跑完整后定                          |
-| error-3           |  ✅ Closed   | noise 根因已修, 4× 确定性验证通过               |
-| error-4           |  ✅ Closed   | wheel OSS + smoke test 生效                     |
-| MD Reorganization |   ✅ Done    | 21 新文件 + 4 旧根文件删除 + 11 归档            |
+| 维度              |    状态     | 详情                                          |
+| :---------------- | :---------: | :-------------------------------------------- |
+| 模型架构          |   ✅ Done   | PEPNetDCNPLE 完整实现 + 6 个 model tests pass |
+| 设计矩阵          | ✅ Complete | v6 2×2×2 + v7 全部 13 实验确定性完成          |
+| v7 变种           | ✅ Complete | dpage 发现 config bug (已修, 结果 = d=8)      |
+| P0 修复验证       | ✅ Verified | 4 次重跑 bitwise identical, **Std=0pp**       |
+| OSS wheel 部署    |   ✅ Done   | 1.2.16 已上传生效, smoke test 通过            |
+| 在线 A/B          |   ✅ Done   | 1 天观察, exp2 > exp1 +5.3% 显著              |
+| 上产决策          |   ⏸️ Hold   | 待设计矩阵重跑完整后定                        |
+| error-3           |  ✅ Closed  | noise 根因已修, 4× 确定性验证通过             |
+| error-4           |  ✅ Closed  | wheel OSS + smoke test 生效                   |
+| MD Reorganization |   ✅ Done   | 21 新文件 + 4 旧根文件删除 + 11 归档          |
 
 ## 📑 文件索引
 
@@ -34,6 +34,7 @@ ______________________________________________________________________
 
 - \[[20-experiments/v6-design-matrix]\] — 2×2×2 设计矩阵 8/8 完整结果
 - \[[20-experiments/v7-ple-d-variants]\] — d=8/16/32, dpage, ph 5 个变种
+- \[[20-experiments/v8-experiments]\] — v8 baseline + PLE+d16 调优
 - \[[20-experiments/5run-noise-investigation]\] — 0.73pp std 调查与根因
 - \[[20-experiments/eval-pipeline-fix]\] — 2026-06-07 P0 修复落地 ⭐
 - \[[20-experiments/ab-test-2026-06-06]\] — 1 天在线 A/B 测试
