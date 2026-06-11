@@ -13,26 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "20-experiments/v8-experiments.md",
+                "file": "20-experiments/v9-experiments.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "v8-experiments"
-            }
-          },
-          {
-            "id": "ea495a015948b280",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "10-architecture/pepnet-dcn-ple.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "pepnet-dcn-ple"
+              "title": "v9-experiments"
             }
           }
         ]
@@ -108,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "20-experiments/v8-experiments.md",
+                "file": "20-experiments/v9-experiments.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -118,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "v8-experiments 的反向链接列表"
+              "title": "v9-experiments 的反向链接列表"
             }
           },
           {
@@ -127,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "20-experiments/v8-experiments.md",
+                "file": "20-experiments/v9-experiments.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "v8-experiments 的出链列表"
+              "title": "v9-experiments 的出链列表"
             }
           },
           {
@@ -170,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "20-experiments/v8-experiments.md",
+                "file": "20-experiments/v9-experiments.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "v8-experiments 的大纲"
+              "title": "v9-experiments 的大纲"
             }
           }
         ]
@@ -199,26 +185,29 @@
   },
   "active": "46df841f2e74d7ec",
   "lastOpenFiles": [
-    "20-experiments/v7-ple-d-variants.md",
     "20-experiments/v8-experiments.md",
+    "20-experiments/v9-experiments.md",
+    "10-architecture/pepnet-dcn-ple.md",
+    "experiment, v9, ple-d16, tower-depth, search-weight.md",
+    "config/v9/home_flow_2604_v9_sota.config",
+    "config/v9/home_flow_2604_v9_cdot32.config",
+    "config/v9/home_flow_2604_v9_search_weight.config",
+    "config/v9/home_flow_2604_v9_deep_tower.config",
+    "config/v9/home_flow_2604_v9_baseline.config",
+    "config/v9",
+    "30-data/sql-attribution-30d-vs-24h.md",
+    "30-data/site-mapping.md",
+    "00-index/decisions-log.md",
+    "20-experiments/v7-ple-d-variants.md",
     "20-experiments/v6-design-matrix.md",
     "10-architecture/data-schema.md",
     "config/v8/home_flow_2604_v8_ple_d16_4gpu.config",
     "config/v8/home_flow_2604_v8_ple_d16_dropout2.config",
     "config/v8/home_flow_2604_v8_ple_d16_dropout0.config",
     "config/v8/home_flow_2604_v8_ple_d16_lr2e3.config",
-    "config/v8/home_flow_2604_v8_ple_d16_lr5e4.config",
-    "config/v8/home_flow_2604_v8_ple_d16_ctr_wt5.config",
-    "config/v8/home_flow_2604_v8_ple_d16_ctr_wt1.config",
-    "config/v8/home_flow_2604_v8_baseline_2gpu.config",
-    "config/v8/home_flow_2604_v8_ple_dlsp.config",
-    "config/v8/home_flow_2604_v6_ple_dlsp.config",
-    "10-architecture/pepnet-dcn-ple.md",
     "[pepnet-dcn-ple.md",
-    "00-index/decisions-log.md",
     "20-experiments/5run-noise-investigation.md",
     "00-index/README.md",
-    "30-data/site-mapping.md",
     "40-errors/error-5-wikilink-frontmatter.md",
     "40-errors/error-6-frontmatter-fragmentation.md",
     "20-experiments/eval-pipeline-fix.md",

@@ -15,7 +15,7 @@ ______________________________________________________________________
 |  2   | PLE+d16 (旧)        | `home_flow_2604_v8_ple_d16.config`          | PLE+d16 (T_max=6300)  | 0.737303 | 0.702010 | +0.13pp | +0.48pp | 0.61  | ✅ 已完成 |
 |  4   | PLE+d16 (修正T_max) | `home_flow_2604_v8_ple_d16.config`          | PLE+d16 (T_max=13000) | 0.737912 | 0.703539 | +0.12pp | +0.46pp | 0.58  | ✅ 已完成 |
 |  7   | PLE+dlsp            | `home_flow_2604_v8_ple_dlsp.config`         | PLE+dlsp              | 0.736970 | 0.700944 | +0.10pp | +0.37pp | 0.47  | ✅ 已完成 |
-|  3   | PLE+d16 4GPU        | `home_flow_2604_v8_ple_d16_4gpu.config`     | 4卡 T_max=6700        | 0.737241 | 0.702098 | +0.12pp | +0.48pp | 0.60  | ✅ 已完成 |
+|  1   | PLE+d16 4GPU        | `home_flow_2604_v8_ple_d16_4gpu.config`     | 4卡 T_max=6700        | 0.744839 | 0.702668 | +0.88pp | +0.54pp | 1.42  | ✅ 已完成 |
 |  8   | PLE+d16 ctr_wt1     | `home_flow_2604_v8_ple_d16_ctr_wt1.config`  | ctr weight=1.0        | 0.739311 | 0.700913 | +0.26pp | +0.20pp | 0.46  | ✅ 已完成 |
 |  5   | PLE+d16 ctr_wt5     | `home_flow_2604_v8_ple_d16_ctr_wt5.config`  | ctr weight=5.0        | 0.737268 | 0.703694 | +0.06pp | +0.48pp | 0.54  | ✅ 已完成 |
 |  9   | PLE+d16 lr5e4       | `home_flow_2604_v8_ple_d16_lr5e4.config`    | lr=0.0005             | 0.737645 | 0.702362 | +0.10pp | +0.35pp | 0.45  | ✅ 已完成 |
@@ -29,8 +29,9 @@ ______________________________________________________________________
 - **ctr_wt=1.0 最特殊**：CVR +0.26pp (全场最高) 但 CTR 仅 +0.20pp — 模型向 CVR 偏移，CTR 损失。ctr_wt=5.0 反之，CTR +0.48pp 但 CVR 回退到 +0.06pp。默认 ctr_wt=3.3 是平衡最优。
 - **lr=0.002 CTR 极化**：CTR +0.49pp 最强但 CVR +0.05pp 最弱；lr=0.0005 稍平衡 (CVR +0.10, CTR +0.35)。默认 lr=0.001 最佳。
 - **Dropout 在 1 epoch 下无效**：dropout=0.0 / 0.1 / 0.2 结果完全相同 (0.737912/0.703539)。原因：1 epoch 欠拟合，模型无过拟合机会，dropout 正则化无意义。
-- **4GPU == 2GPU**：4 卡结果 (0.737241/0.702098) 与 2 卡 (0.737912/0.703539) 在随机误差范围内，确认 batch_size 的线性和 T_max 缩放的正确性。
-- **最终推荐**：默认 PLE+d16（dropout=0.1, lr=0.001, ctr_wt=3.3），CVR +0.12pp, CTR +0.46pp。
+- **4GPU (eff_bs=16384) >> 2GPU (eff_bs=8192)**：之前记录错误（用了 2 卡评估结果）。真实 4 卡 PLE+d16 CVR +0.88pp / CTR +0.54pp，综合Δ=1.42，**远优于** 2 卡的 +0.12pp/+0.46pp。更大的有效 batch size 对 CVR 提升显著。
+- **最终推荐（2GPU）**：默认 PLE+d16（dropout=0.1, lr=0.001, ctr_wt=3.3），CVR +0.12pp, CTR +0.46pp。
+- **最终推荐（4GPU）**：PLE+d16 4GPU（eff_bs=16384），CVR +0.88pp, CTR +0.54pp — 如果生产环境支持 4GPU 优先选用。
 
 ## Config 完整清单 (v8 目录)
 
