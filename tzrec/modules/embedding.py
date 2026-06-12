@@ -239,6 +239,58 @@ class EmbeddingGroup(nn.Module):
             self.seq_emb_impls[k] = SequenceEmbeddingGroupImpl(
                 features, feature_groups=v, device=device
             )
+
+        # --- Weight sharing: bag ↔ sequence ---
+        # When the same embedding_name appears in both a bag EmbeddingBagCollection
+        # and a sequence EmbeddingCollection, alias the seq weight → bag weight.
+        # This gives both target and sequence item_id a single shared embedding table.
+        for impl_key in set(self.emb_impls.keys()) & set(self.seq_emb_impls.keys()):
+            bag_impl = self.emb_impls[impl_key]
+            seq_impl = self.seq_emb_impls[impl_key]
+            if not hasattr(bag_impl, "ebc"):
+                continue
+            # Collect bag embedding names (keyed by embedding_config.name).
+            bag_names = set(bag_impl.ebc.embedding_bags.keys())
+            if hasattr(bag_impl, "mc_ebc"):
+                bag_names.update(bag_impl.mc_ebc.embedding_bags.keys())
+            # Collect seq embedding names across all ec_dict (keyed by embedding_dim).
+            seq_names = set()
+            for ec in seq_impl.ec_dict.values():
+                seq_names.update(ec.embeddings.keys())
+            for ec in seq_impl.mc_ec_dict.values():
+                seq_names.update(ec._ec.embeddings.keys())
+            # Find intersection → same name means "intended to be shared".
+            for name in bag_names & seq_names:
+                bag_weight = (
+                    bag_impl.ebc.embedding_bags[name].weight
+                    if name in bag_impl.ebc.embedding_bags
+                    else bag_impl.mc_ebc.embedding_bags[name].weight
+                )
+                for ec in seq_impl.ec_dict.values():
+                    if name in ec.embeddings:
+                        seq_emb = ec.embeddings[name]
+                        if seq_emb.weight.shape != bag_weight.shape:
+                            raise ValueError(
+                                f"Shared embedding [{name}] shape mismatch: "
+                                f"bag={tuple(bag_weight.shape)} vs "
+                                f"seq={tuple(seq_emb.weight.shape)}. "
+                                "Both must use the same hash_bucket_size and "
+                                "embedding_dim when sharing."
+                            )
+                        seq_emb.weight = bag_weight
+                for ec in seq_impl.mc_ec_dict.values():
+                    if name in ec._ec.embeddings:
+                        seq_emb = ec._ec.embeddings[name]
+                        if seq_emb.weight.shape != bag_weight.shape:
+                            raise ValueError(
+                                f"Shared embedding [{name}] shape mismatch: "
+                                f"bag={tuple(bag_weight.shape)} vs "
+                                f"seq={tuple(seq_emb.weight.shape)}. "
+                                "Both must use the same hash_bucket_size and "
+                                "embedding_dim when sharing."
+                            )
+                        seq_emb.weight = bag_weight
+
         self._group_name_to_seq_encoders = nn.ModuleDict()
         for (
             group_name,

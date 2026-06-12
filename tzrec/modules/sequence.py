@@ -71,6 +71,8 @@ class DINEncoder(SequenceEncoder):
         input(str): input feature group name.
         attn_mlp (dict): target attention MLP module parameters.
         max_seq_length (int): maximum sequence length.
+        time_gate_dim (int): if > 0, the last ``time_gate_dim`` dims of seq_emb
+            are time features used for multiplicative time gating.
     """
 
     def __init__(
@@ -80,15 +82,20 @@ class DINEncoder(SequenceEncoder):
         input: str,
         attn_mlp: Dict[str, Any],
         max_seq_length: int = 0,
+        time_gate_dim: int = 0,
         **kwargs: Optional[Dict[str, Any]],
     ) -> None:
         super().__init__(input)
         self._query_dim = query_dim
         self._sequence_dim = sequence_dim
-        if self._query_dim > self._sequence_dim:
-            raise ValueError("query_dim > sequence_dim not supported yet.")
-        self.mlp = MLP(in_features=sequence_dim * 4, dim=3, **attn_mlp)
+        self._time_gate_dim = time_gate_dim
+        self._content_seq_dim = sequence_dim - time_gate_dim
+        if self._query_dim > self._content_seq_dim:
+            raise ValueError("query_dim > content_seq_dim not supported.")
+        self.mlp = MLP(in_features=self._content_seq_dim * 4, dim=3, **attn_mlp)
         self.linear = nn.Linear(self.mlp.hidden_units[-1], 1)
+        if time_gate_dim > 0:
+            self.time_gate_linear = nn.Linear(time_gate_dim, 1)
         self._query_name = f"{input}.query"
         self._sequence_name = f"{input}.sequence"
         self._sequence_length_name = f"{input}.sequence_length"
@@ -96,7 +103,7 @@ class DINEncoder(SequenceEncoder):
 
     def output_dim(self) -> int:
         """Output dimension of the module."""
-        return self._sequence_dim
+        return self._content_seq_dim
 
     def forward(self, sequence_embedded: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Forward the module."""
@@ -111,12 +118,21 @@ class DINEncoder(SequenceEncoder):
             max_seq_length, device=sequence_length.device
         ).unsqueeze(0) < sequence_length.unsqueeze(1)
 
-        if self._query_dim < self._sequence_dim:
-            query = F.pad(query, (0, self._sequence_dim - self._query_dim))
+        if self._time_gate_dim > 0:
+            ts_emb = sequence[:, :, -self._time_gate_dim :]
+            content_seq = sequence[:, :, : -self._time_gate_dim]
+            gate = torch.sigmoid(self.time_gate_linear(ts_emb))
+        else:
+            content_seq = sequence
+            gate = None
+
+        if self._query_dim < self._content_seq_dim:
+            query = F.pad(query, (0, self._content_seq_dim - self._query_dim))
         queries = query.unsqueeze(1).expand(-1, max_seq_length, -1)
 
         attn_input = torch.cat(
-            [queries, sequence, queries - sequence, queries * sequence], dim=-1
+            [queries, content_seq, queries - content_seq, queries * content_seq],
+            dim=-1,
         )
         attn_output = self.mlp(attn_input)
         attn_output = self.linear(attn_output)
@@ -124,8 +140,12 @@ class DINEncoder(SequenceEncoder):
 
         padding = torch.ones_like(attn_output) * (-(2**31) + 1)
         scores = torch.where(sequence_mask.unsqueeze(1), attn_output, padding)
+
+        if gate is not None:
+            scores = scores * gate.transpose(1, 2)
+
         scores = F.softmax(scores, dim=-1)
-        return torch.matmul(scores, sequence).squeeze(1)
+        return torch.matmul(scores, content_seq).squeeze(1)
 
 
 class SimpleAttention(SequenceEncoder):

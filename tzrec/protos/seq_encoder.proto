@@ -12,6 +12,10 @@ message DINEncoder {
     required MLP attn_mlp = 3;
     // maximum sequence length
     optional int32 max_seq_length = 6 [default = 0];
+    // time gate dim: if > 0, the last `time_gate_dim` dims of seq_emb
+    // are used as time-stamp features for multiplicative time gating:
+    //   score *= sigmoid(Linear(ts_emb))
+    optional int32 time_gate_dim = 7 [default = 0];
 }
 
 message SimpleAttention {

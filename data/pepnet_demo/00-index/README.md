@@ -44,6 +44,7 @@ ______________________________________________________________________
 
 - \[[30-data/sample-v1-60d]\] — 60 天样本集 (线上 base 使用)
 - \[[30-data/sample-v2-7d]\] — 7 天样本集 (v6+ exp 使用)
+- \[[30-data/sample-v3-pipeline]\] — sample_v3 特征工程全流程：SQL → FG → EasyRec
 - \[[30-data/sql-attribution-30d-vs-24h]\] — 标签归因窗口 30d vs 24h 关键差异 ⭐
 - \[[30-data/site-mapping]\] — site/level 分布分析
 

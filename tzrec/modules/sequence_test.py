@@ -252,6 +252,55 @@ class MultiWindowDINEncoderTest(unittest.TestCase):
         self.assertEqual(result.size(), (4, 7 * 16))
 
 
+class DINEncoderWithTimeGateTest(unittest.TestCase):
+    @parameterized.expand(
+        [
+            [TestGraphType.NORMAL, 0],
+            [TestGraphType.FX_TRACE, 0],
+            [TestGraphType.JIT_SCRIPT, 0],
+            [TestGraphType.NORMAL, 3],
+            [TestGraphType.FX_TRACE, 3],
+            [TestGraphType.JIT_SCRIPT, 3],
+        ]
+    )
+    def test_din_encoder_time_gate(self, graph_type, max_seq_length) -> None:
+        content_dim = 16
+        time_gate_dim = 4
+        din = DINEncoder(
+            query_dim=content_dim,
+            sequence_dim=content_dim + time_gate_dim,
+            input="click_seq",
+            attn_mlp=dict(
+                hidden_units=[8, 4, 2],
+                activation="nn.ReLU",
+                use_bn=False,
+                dropout_ratio=0.9,
+            ),
+            max_seq_length=max_seq_length,
+            time_gate_dim=time_gate_dim,
+        )
+        self.assertEqual(din.output_dim(), content_dim)
+        din = create_test_module(din, graph_type)
+        if max_seq_length > 0:
+            embedded = {
+                "click_seq.query": torch.randn(4, content_dim),
+                "click_seq.sequence": torch.randn(
+                    4, max_seq_length, content_dim + time_gate_dim
+                ),
+                "click_seq.sequence_length": torch.clamp_max(
+                    torch.tensor([2, 3, 4, 5]), max_seq_length
+                ),
+            }
+        else:
+            embedded = {
+                "click_seq.query": torch.randn(4, content_dim),
+                "click_seq.sequence": torch.randn(4, 10, content_dim + time_gate_dim),
+                "click_seq.sequence_length": torch.tensor([2, 3, 4, 5]),
+            }
+        result = din(embedded)
+        self.assertEqual(result.size(), (4, content_dim))
+
+
 class CreateSequenceTest(unittest.TestCase):
     def test_create_seq_encoder(self) -> None:
         din_encoder = seq_encoder_pb2.DINEncoder(
@@ -269,6 +318,19 @@ class CreateSequenceTest(unittest.TestCase):
         group_total_dim = {"all.query": 16, "all.sequence": 16}
         encoder = create_seq_encoder(config, group_total_dim)
         self.assertEqual(encoder.__class__, SimpleAttention)
+
+    def test_create_seq_encoder_time_gate(self) -> None:
+        din_encoder = seq_encoder_pb2.DINEncoder(
+            name="test",
+            input="all",
+            attn_mlp=module_pb2.MLP(hidden_units=[128, 20]),
+            time_gate_dim=4,
+        )
+        config = seq_encoder_pb2.SeqEncoderConfig(din_encoder=din_encoder)
+        group_total_dim = {"all.query": 12, "all.sequence": 16}
+        encoder = create_seq_encoder(config, group_total_dim)
+        self.assertEqual(encoder.__class__, DINEncoder)
+        self.assertEqual(encoder.output_dim(), 12)
 
 
 if __name__ == "__main__":
