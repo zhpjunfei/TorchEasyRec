@@ -113,5 +113,5 @@ ON      a.item_id = b.item_id
 WHERE   a.dt = '${bdp.system.bizdate}'
 ;
 
-ALTER TABLE home_flow_2604_ads_log_zhekou_rec_item_basic_info_preprocess_v1 ADD IF NOT EXISTS PARTITION(dt='${bdp.system.bizdate}.done')
+ALTER TABLE home_flow_2604_ads_log_zhekou_rec_item_basic_info_preprocess_v3 ADD IF NOT EXISTS PARTITION(dt='${bdp.system.bizdate}.done')
 ;

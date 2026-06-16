@@ -3,37 +3,90 @@
 ## 目录结构 & 数据流
 
 ```
-[ODPS源表]
-    │
-    ▼
-① item_basic_info_preprocess_v3.sql ──────────→ item_basic_info_preprocess_v3 (商品画像宽表)
-    │
-    ├──→ pre_t_seq 分支 (历史行为，离线回填)
-    │       │
-    │       ├── behavior_wide_for_pre_t_seq_v3 (行为+商品画像 JOIN)
-    │       │   └── WM_CONCAT_BY_SORT 按 mmb_id 聚合，产出 6 种序列
-    │       └── mmb_id_pre_t_seq_v3 (6×21=126列 序列特征)
-    │
-    └──→ t_seq 分支 (实时行为，在线拼接)
-            │
-            ├── behavior_wide_for_t_seq_v3 (行为+商品画像 JOIN)
-            │   └── RT_SEQ_FEATURE 窗口函数，产出 3 种序列
-            └── mmb_id_t_seq_v3 (3×21=63列 序列特征)
+┌══════════════════════════ 离线批处理 (ODPS MaxCompute, 每日一次) ══════════════════════════┐
+│                                                                                           │
+ │ [ODPS源表]                                                                                │
+│     │ mmb_dwh.dwd_log_zhekou_rec_user_bhv_info                                             │
+│     ▼                                                                                     │
+│ ⓪ preprocess_v1.sql ──────→ preprocess_v1 (10列, 当天行为日志, 含request_id/page)         │
+│     │                                                                                     │
+│     ├──→ ① item_basic_info_preprocess_v3.sql ─────→ item_basic_info_preprocess_v3         │
+│     │       (商品画像宽表, 30+列, 含title_vector)                                          │
+│     │                                                                                     │
+│     ├──→ pre_t_agg_v1.sql ←── 行为预聚合                                                  │
+│     │       │ 15天, [mmb_id,item_id,event]去重, 截Top-50/20/10                            │
+│     │       │ 输出: pre_t_agg_v1 (5列, 不含商品属性!)                                    │
+│     │       │                                                                             │
+│     │       ├──→ pre_t_seq 分支 (历史行为，T-1)                                           │
+│     │       │       │  LEFT JOIN item_basic_info 补齐商品属性                              │
+│     │       │       ├── behavior_wide_for_pre_t_seq_v3 (宽表,行为+商品画像)               │
+│     │       │       │   └── WM_CONCAT_BY_SORT 按 mmb_id 聚合，产出 6 种序列               │
+│     │       │       └── mmb_id_pre_t_seq_v3 (6×21=126列 序列特征)                         │
+│     │       │                                                                             │
+│     │       └──→ pre_t_agg_v1_agg.sql ←── FS 同步中间表                                   │
+│     │            └── 180天行为, 再次去重截断, 输出5列                                       │
+│     │                用作 Python sync 的 datasource                                        │
+│     │                                                                                     │
+│     └──→ t_seq 分支 (当天行为，T)                                                          │
+│             │                                                                             │
+│             ├── behavior_wide_for_t_seq_v3 (行为+商品画像 JOIN)                           │
+│             │   └── RT_SEQ_FEATURE 窗口函数，产出 3 种序列                                │
+│             └── mmb_id_t_seq_v3 (3×21=63列 序列特征)                                      │
+│                                                                                           │
+│ ② mmb_id_all_seq_feat_v3.sql                                                              │
+│     ├── sq0 = t_seq (实时长序列: click_50, conversion_20, favorite_10)                     │
+│     ├── sq1 = pre_t_seq (离线短序列: click_10, conversion_5, favorite_5)                   │
+│     └── SINGLE_SEQ_REPLENISH 补齐 → 产出 6 种完整序列 (120列)                              │
+│                                                                                           │
+│ ③ fix_sample_v3.sql ──────→ training_set (含 ~600 列非序列特征)                           │
+│                                                                                           │
+│ [下游 pipeline 将 training_set + all_seq_feat JOIN]                                       │
+│     │                                                                                     │
+│     ▼                                                                                     │
+│ ④ pyfg101 编码 (ctrcvr_sorter_config_fg_v3.json)                                         │
+│     │                                                                                     │
+│     ▼                                                                                     │
+│ ⑤ TFRecord → EasyRec 训练                                                                 │
+│                                                                                           │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
 
-② mmb_id_all_seq_feat_v3.sql
-    ├── sq0 = t_seq (实时长序列: click_50, conversion_20, favorite_10)
-    ├── sq1 = pre_t_seq (离线短序列: click_10, conversion_5, favorite_5)
-    └── SINGLE_SEQ_REPLENISH 补齐 → 产出 6 种完整序列
+┌══════════════════════════ 实时流处理 (Flink SQL) ════════════════════════════════════════┐
+│                                                                                           │
+│ SLS (LogService: mmb-zhekou-log/user-bhv-log)                                             │
+│     │                                                                                     │
+│     ├──→ ⑥ mmb_id_all_seq_feat_v1_flink.sql                                               │
+│     │   └── 原始事件 (event_time, event, item_id, mmb_id) → FeatureStore (v1)             │
+│     │       用于在线推理时实时拼接序列 (不自己做序列化, 由FS框架处理)                       │
+│     │                                                                                     │
+│     └──→ ⑦ statistic_real_time_feature_to_fs_v1.sql                                       │
+│         └── SLS → JOIN item_info → MessageDelay → SWCountCatesKVS                         │
+│              ├──→ item_id_rt_statistic_feat (item行为计数: 1h/3h/12h/24h)                 │
+│              └──→ mmb_id_rt_statistic_feat (user行为KV特征: 20属性×3行为×4窗口)           │
+│                                                                                           │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
 
-③ fix_sample_v3.sql ──────────→ training_set (含 ~600 列非序列特征)
+┌══════════════════════════ 离线→在线同步 (Python) ════════════════════════════════════════┐
+│                                                                                           │
+│ ⑧ create_sync_onlinestore.py                                                              │
+│     └── FeatureStoreClient → create_sequence_feature_view                                 │
+│         ├── datasource = pre_t_agg_v1_agg (MaxCompute)                                    │
+│         ├── event_time='event_unix_time' (源表event_time列) ✓                              │
+│         ├── 120个 SequenceFeatureConfig (offline列→online序列名)                           │
+│         ├── SequenceTableConfig(event_time='request_id') ← ⚠️ 配置错误                     │
+│         └── publish_table(direct_sync=True) → FeatureStore 在线表                         │
+│                                                                                           │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
 
-[下游 pipeline 将 training_set + all_seq_feat JOIN]
-    │
-    ▼
-④ pyfg101 编码 (ctrcvr_sorter_config_fg_v3.json)
-    │
-    ▼
-⑤ TFRecord → EasyRec 训练
+┌══════════════════════════ 在线推理 (FeatureStore + FG + EasyRec) ════════════════════════┐
+│                                                                                           │
+│ 推理请求 (mmb_id, item_id, context)                                                        │
+│     │                                                                                     │
+│     ├──→ FeatureStore: 拉取用户行为序列 (v3同步历史 + v1 Flink实时)                       │
+│     ├──→ FeatureStore: 拉取item/user统计特征 (statistic_rt + batch)                       │
+│     ├──→ pyfg101: FG编码 → TFRecord                                                        │
+│     └──→ EasyRec: 模型 scoring                                                             │
+│                                                                                           │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ______________________________________________________________________
@@ -63,9 +116,120 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
+### 1a. `dwd_log_zhekou_rec_user_bhv_info_preprocess_v1.sql` — 行为日志清洗
+
+**文件**: `home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_preprocess_v1.sql` (34 行)
+
+**角色**: 整条 v3 管线最上游的行为数据入口。从 ODPS 源表读取当天行为日志，进行最小清洗。
+
+**数据流**:
+
+```
+mmb_dwh.dwd_log_zhekou_rec_user_bhv_info (原始ODPS行为日志, dt=bizdate)
+  │
+  │ event_time, event, event_value, item_id, scene, mmb_id, request_id, page
+  ▼
+清洗操作:
+  ① scene → REPLACE(':', '_')     ← 防序列分隔符冲突
+  ② page  → REPLACE(':', '_')     ← 同上
+  ③ event_time → event_unix_time  ← 别名
+  ④ DATEPART → day_h             ← 当天第几小时 (0-23)
+  ⑤ WEEKDAY  → week_day          ← 星期几 (0-6)
+  ▼
+home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_preprocess_v1 (10列)
+```
+
+**输出表 schema** (10 列):
+
+| 列名              | 类型   | 说明                          |
+| ----------------- | ------ | ----------------------------- |
+| `event_unix_time` | BIGINT | Unix 时间戳                   |
+| `event`           | STRING | click / conversion / favorite |
+| `event_value`     | DOUBLE | 行为数值（如成交金额）        |
+| `item_id`         | STRING | 商品 ID                       |
+| `scene`           | STRING | 场景（已清洗 `:`）            |
+| `mmb_id`          | STRING | 用户 ID                       |
+| `request_id`      | STRING | 请求 ID                       |
+| `page`            | STRING | 页面（已清洗 `:`）            |
+| `day_h`           | BIGINT | 行为当天的小时                |
+| `week_day`        | BIGINT | 行为当天的星期                |
+
+**关键属性**: 仅含行为日志字段，**不含任何商品属性**（cate_id_path, brand 等）。商品属性在后续 SQL 中通过 LEFT JOIN `item_basic_info_preprocess_v3` 引入。
+
+**下游引用**:
+
+- `mmb_id_t_seq_v3.sql` (t_seq 分支): 直接引用, LEFT JOIN item_basic_info 得宽表
+- `mmb_id_pre_t_agg_v1.sql` (pre_t 聚合): 从此表读取 15 天数据做聚合
+
+______________________________________________________________________
+
+### 1b. `dwd_log_zhekou_rec_user_bhv_info_pre_t_agg_v1.sql` — 行为预聚合
+
+**文件**: `home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_pre_t_agg_v1.sql` (36 行)
+
+**角色**: 从 `preprocess_v1` 表聚合历史行为，去重 + 截断，作为 `pre_t_seq` 分支的输入。
+
+**数据流**:
+
+```
+preprocess_v1 (10列, 15天分区: bizdate-14 ~ bizdate)
+  │
+  │ 过滤: event IN ('click','conversion','favorite')
+  │
+  ▼ 两层 Row_Number 去重截断:
+
+  内层 rk: PARTITION BY mmb_id, item_id, event
+           ORDER BY event_unix_time DESC
+           → 保留 rk=1 (同一用户对同一商品同种行为只留最新)
+
+  外层 rnk: PARTITION BY mmb_id, event
+            ORDER BY event_unix_time DESC
+            → 保留 rnk ≤ N: click=50, conversion=20, favorite=10
+  ▼
+pre_t_agg_v1 (5列, 每人每种行为最多N条)
+```
+
+**输出表 schema** (5 列):
+
+| 列名              | 类型   | 说明                          |
+| ----------------- | ------ | ----------------------------- |
+| `event_unix_time` | BIGINT | Unix 时间戳                   |
+| `event`           | STRING | click / conversion / favorite |
+| `item_id`         | STRING | 商品 ID                       |
+| `scene`           | STRING | 场景                          |
+| `mmb_id`          | STRING | 用户 ID                       |
+
+**关键属性**: 仅 5 列，**不含商品属性、不含 request_id、不含 event_value**。这是一个纯聚合索引表，记录"谁在什么时候对什么商品做了什么行为"。
+
+**与 `preprocess_v1` 的对比**:
+
+| 维度     | preprocess_v1                                | pre_t_agg_v1                   |
+| -------- | -------------------------------------------- | ------------------------------ |
+| 数据范围 | 当天 (dt=bizdate)                            | 近 15 天                       |
+| 行数     | 当天全部行为                                 | 去重后每人每种最多 50/20/10 条 |
+| 列数     | 10 列 (含 request_id, page, day_h, week_day) | 5 列 (仅核心标识)              |
+| 用途     | t_seq 分支的宽表源                           | pre_t_seq 分支的聚合源         |
+
+**两层去重的意义**:
+
+```
+原始日志: 用户A 在1分钟内点击了商品X 3次
+  ↓ 内层 rk: 3 条 → 保留 1 条 (最新那次)
+  ↓ 外层 rnk: 该用户当日可能有200次click → 保留最近的50条
+```
+
+**下游引用**:
+
+- `mmb_id_pre_t_seq_v3.sql`: 引用 `pre_t_agg_v1`，LEFT JOIN `item_basic_info_preprocess_v3` 补齐商品属性后做 WM_CONCAT_BY_SORT
+- `mmb_id_pre_t_agg_v1_agg.sql`: 引用 `pre_t_agg_v1` 的 180 天分区做第二层聚合 (FS 同步数据源)
+
+______________________________________________________________________
+
 ### 2. `mmb_id_pre_t_seq_v3.sql` — 离线预训练序列特征
 
-**输入**: `dwd_log_zhekou_rec_user_bhv_info_pre_t_agg_v1` (历史行为) + `item_basic_info_preprocess_v3` (商品画像)
+**输入**: `pre_t_agg_v1` (历史行为聚合, 5列) + `item_basic_info_preprocess_v3` (商品画像, 30+列)
+
+**关键**: `pre_t_agg_v1` 只含行为标识（谁、什么时间、对什么商品、做了什么），不含商品属性。商品属性在此步骤通过 LEFT JOIN `item_basic_info_preprocess_v3` 引入，形成宽表后再做 WM_CONCAT_BY_SORT 序列化。
 
 **输出**: `home_flow_2604_mmb_id_pre_t_seq_v3`
 
@@ -494,7 +658,7 @@ ts 单独走乘法门控分支：
 +        return torch.matmul(scores, content_seq).squeeze(1)
 ```
 
-**Config 改动**（基于 `seq_align`，结果见 `home_flow_2604_v10_seq_align_b2.config`）：
+**Config 改动**（基于 `seq_align`，结果见 `home_flow_2604_v10_seq_align_b2.config`；完全体 `seq_align_all_b2` 基于 `seq_align_all` 加 `time_gate_dim:8`，位于 `home_flow_2604_v10_seq_align_all_b2.config`）：
 
 ```diff
    sequence_encoders {
@@ -516,9 +680,12 @@ ts 单独走乘法门控分支：
 #### 各方案 DIN 输入变化
 
 ```
-当前（baseline concat）：   [216] + [224] + [216−224] + [216×224]  →  F.pad(0→28) → MLP(896)
-seq_align（仅 item_id 修复）：[216] + [224] + [216−224] + [216×224]  →  F.pad(0→8)  → MLP(896)
-B2（ts 门控，未混入 content）：[216] + [216] + [216−216] + [216×216]  →  零 F.pad     → MLP(864)
+当前（baseline concat）：     [188] + [216/212] +  F.pad(0→24~28)  → MLP(896)
+seq_align：                  [188] + [224/220] +  F.pad(0→32~36)  → MLP(896)
+seq_align_b2（ts 门控）：     [188] + [216]     +  F.pad(0→28)     → MLP(864)
+seq_align_cate（cate align）：[216] + [216/212] +  F.pad(0)/proj(4) → MLP(896)
+seq_align_all：               [216] + [224/220] +  F.pad(4~8)      → MLP(896)
+seq_align_all_b2：            [216] + [216]     +  零 F.pad        → MLP(864)  ← 最优
 ```
 
 ______________________________________________________________________
@@ -847,11 +1014,37 @@ ______________________________________________________________________
 **原理**: `EmbeddingGroup.__init__` 在构建完 bag 和 seq 的 `EmbeddingCollection` 后，检测哪些 `embedding_name` 同时出现在两者中。对匹配的 name，将 seq 的 `EmbeddingCollection` 中对应的 `nn.Embedding.weight` 替换为 bag 侧 `EmbeddingBagCollection` 中同一个 `nn.Parameter` 对象。
 
 ```python
-# tzrec/modules/embedding.py:243-274
+# tzrec/modules/embedding.py:243-292
+# 1) 收集 bag 侧和 seq 侧的 embedding name
+bag_names = set(bag_impl.ebc.embedding_bags.keys())
+if hasattr(bag_impl, "mc_ebc"):
+    bag_names.update(bag_impl.mc_ebc._embedding_module.embedding_bags.keys())
+    #               ^^^^^^^^^^^^^^ 注意：MC wrapper 不暴露 embedding_bags，
+    #                               需过 _embedding_module 访问内部 EBC
+
+seq_names = set()
+for ec in seq_impl.ec_dict.values():
+    seq_names.update(ec.embeddings.keys())
+for ec in seq_impl.mc_ec_dict.values():
+    seq_names.update(ec._embedding_module.embeddings.keys())
+
+# 2) 对同名的 embedding，alias seq 的 weight → bag 的 weight
 for name in bag_names & seq_names:
-    bag_weight = bag_impl.ebc.embedding_bags[name].weight
-    seq_emb = ec.embeddings[name]
-    seq_emb.weight = bag_weight  # 同一个 Parameter 对象
+    bag_weight = (
+        bag_impl.ebc.embedding_bags[name].weight
+        if name in bag_impl.ebc.embedding_bags
+        else bag_impl.mc_ebc._embedding_module.embedding_bags[name].weight
+    )
+    for ec in seq_impl.ec_dict.values():
+        if name in ec.embeddings:
+            seq_emb = ec.embeddings[name]
+            assert seq_emb.weight.shape == bag_weight.shape
+            seq_emb.weight = bag_weight  # 同一个 Parameter 对象
+    for ec in seq_impl.mc_ec_dict.values():
+        if name in ec._embedding_module.embeddings:
+            seq_emb = ec._embedding_module.embeddings[name]
+            assert seq_emb.weight.shape == bag_weight.shape
+            seq_emb.weight = bag_weight
 ```
 
 这样:
@@ -861,6 +1054,8 @@ for name in bag_names & seq_names:
 - 推理时只有一个权重 (checkpoint 中只存一份)
 
 **前提条件**: 两者的 `hash_bucket_size` 和 `embedding_dim` 必须完全一致 (代码中有 assert 校验)。
+
+**注意**: `ManagedCollisionEmbeddingBagCollection` (MC wrapper for ZCH emb) 不直接暴露 `embedding_bags`/`embeddings` 属性，需通过 `_embedding_module` 访问内部的 `EmbeddingBagCollection`/`EmbeddingCollection`。同理 `ManagedCollisionEmbeddingCollection` (seq 侧的 MC wrapper) 也用 `_embedding_module`。
 
 ### 12c. 配置变更
 
@@ -902,3 +1097,383 @@ id_feature {
 | 模型大小        | checkpoint 中存两份权重               | checkpoint 中存一份        |
 
 开启 weight sharing 后 CVR 预期回升（缓解 seq 侧 1.96M→3M 的稀疏过拟合）。
+
+### 12e. DMP (Distributed Model Parallel) 兼容性
+
+**问题**: `seq_emb.weight = bag_weight` 使 bag `EmbeddingBagCollection` 和 seq `EmbeddingCollection` 指向同一个 `nn.Parameter` 对象。DMP 的 `sparse_parameters()` (Queue 遍历所有子模块) 会分别采集 bag 和 seq 的 `named_parameters()`，同一 tensor 被收集两次 → `apply_optimizer_in_backward` 重复 stamp → `_optimizer_classes = [Adam, Adam]` → DMP sharder `create_grouped_sharding_infos` 断言 `len(optimizer_classes) == 1` 失败，报 `AssertionError: Only support 1 optimizer`。
+
+**修复** (`tzrec/models/model.py:192-210`): `sparse_parameters()` 返回前按 `id(p)` 去重:
+
+```python
+seen_ids = set()
+deduped_trainable = []
+for p in trainable_parameters_list:
+    pid = id(p)
+    if pid not in seen_ids:
+        seen_ids.add(pid)
+        deduped_trainable.append(p)
+```
+
+**局限**: DMP 会分别替换 bag EBC → `ShardedEmbeddingBagCollection` 和 seq EC → `ShardedEmbeddingCollection`，各自创建独立的分布式参数。虽然 `_optimizer_classes` 不再重复，但 DMP 无法保持 parameter 别名关系 — bag 和 seq 的权重在分布式训练中独立更新、逐步漂移。
+
+实际影响：
+
+- **初始化一致**：两者从同一份预训练权重开始（约等于 weight sharing 起点）
+- **训练中漂移**：梯度独立作用在不同 shard 上，权重缓慢偏离
+- **效果**：item_id embedding 维度高（32×3M），漂移速度慢，能保持大部分共享信号。dim alignment + cate alignment 的收益不受影响
+- **后续**：true weight sharing (同一个 shard 合并梯度更新) 需要定制 TorchRec planner/sharder，当前版本未实现
+
+______________________________________________________________________
+
+## 13. 实时流处理 (Flink SQL)
+
+### 13a. `mmb_id_all_seq_feat_v1_flink.sql` — 实时行为事件写入
+
+**文件**: `home_flow_2604_mmb_id_all_seq_feat_v1_flink.sql` (70 行)
+
+**角色**: 将 SLS 实时用户行为日志以原始事件格式写入 FeatureStore，用于在线推理时实时序列拼接。
+
+**数据流**:
+
+```
+SLS (mmb-zhekou-log/user-bhv-log)
+  │ connector = 'sls', query: user_id/doc_id 非空
+  ▼
+rec_realtime_user_bhv (View)
+  │ __tag__['__receive_time__'] → event_time
+  │ bhv_type → event
+  │ doc_id → item_id
+  │ user_id → mmb_id
+  ▼
+mmb_id_all_seq_feat (FeatureStore Sink)
+  │ 只写入: event_time, event, item_id, mmb_id
+  │ 过滤: WHERE event IN ('click','conversion','favorite')
+  │ 表: home_flow_2604_mmb_id_all_seq_feat_v1
+  │ FeatureStore project: feature_mall
+```
+
+**与 v3 批处理的差异**:
+
+| 维度       | v3 批处理 (all_seq_feat_v3.sql)        | v1 Flink (\_flink.sql) |
+| ---------- | -------------------------------------- | ---------------------- |
+| 计算引擎   | ODPS MaxCompute, 每日一次              | Flink, 实时流          |
+| 输出       | 120 列 (20属性×6序列) 的序列特征       | 4 列原始事件           |
+| 序列化逻辑 | `SINGLE_SEQ_REPLENISH` 合并同天+前一天 | **不做序列化**         |
+| 用途       | 离线训练样本                           | 在线推理实时事件源     |
+
+**在线推理时**: FeatureStore 根据 v1 表中原始事件实时拼接用户近期行为序列。Flink 只写 4 列原始事件的原因是——**序列化逻辑由 FeatureStore Go SDK 完成**，而非 SQL。
+
+______________________________________________________________________
+
+### 13b. `statistic_real_time_feature_to_fs_v1.sql` — 实时统计特征
+
+**文件**: `home_flow_2604_statistic_real_time_feature_to_fs_v1.sql` (83 行)
+
+**角色**: 同源 SLS 输入，计算滑动窗口统计特征，输出到两个 FeatureStore 表。
+
+**数据流**:
+
+```
+SLS (同源)
+  ▼
+rec_realtime_user_bhv (event_time, event, item_id, mmb_id, request_id)
+  ▼ LEFT JOIN item_basic_info_preprocess_v1 (FeatureStore, FOR SYSTEM_TIME AS OF PROCTIME())
+  ▼
+rec_realtime_user_bhv_wide_v1 (含20+ item属性: cate_id_path, brand, ...)
+  ▼ GROUP BY group_key (HashBucket(mmb_id, 2))
+  ▼ MessageDelay(ARRAY[mmb_id,item_id,event,...,username], event_time,
+  │             ARRAY[3600,10800,43200,86400], group_key, event_filter)
+  ▼
+rec_realtime_user_bhv_wide_delay_v1 (延迟信息注入, 含delay_flag)
+  │
+  ├──→ GROUP BY item_id
+  │       └── SWCountCatesKVS → item__cnt_click/conversion/favorite_rt{1h,3h,12h,24h}
+  │       └── Sink: home_flow_2604_item_id_rt_statistic_feat (FeatureStore)
+  │
+  └──→ GROUP BY mmb_id
+          └── SWCountCatesKVS → user__kv_{attr}_{behav}_rt{1h} (20属性×3行为)
+          └── Sink: home_flow_2604_mmb_id_rt_statistic_feat (FeatureStore)
+```
+
+**两个输出表**:
+
+| 输出表                      | 维度              | 窗口                | 特征示例                                                        |
+| --------------------------- | ----------------- | ------------------- | --------------------------------------------------------------- |
+| `item_id_rt_statistic_feat` | item 行为计数     | 1h, 3h, 12h, 24h    | `item__cnt_click_rt1h`, `item__cnt_conversion_rt24h`            |
+| `mmb_id_rt_statistic_feat`  | user 行为 KV 特征 | 1h (含20属性×3行为) | `user__kv_item_id_click_rt1h`, `user__kv_brand_conversion_rt1h` |
+
+**关键实现细节**:
+
+- `MessageDelay` UDF: 解决实时流中事件乱序/延迟到达问题，支持 4 个延迟窗口 (1h/3h/12h/24h) 的事件重新分配
+- `SWCountCatesKVS` UDF: 滑动窗口计数，窗口内按类别聚合为 KV 对
+- `HashBucket(mmb_id, 2)`: 双 bucket 保证因果一致性，同时提升并行度
+
+**安全问题**: 两份 Flink SQL 均在 SQL 中硬编码了 SLS/FeatureStore 的 `accessId` 和 `accessKey`，应替换为 RAM Role。
+
+______________________________________________________________________
+
+## 14. 离线→在线同步: Python Sync Script
+
+### 14a. `create_sync_onlinestore.py` — 特征视图创建与同步
+
+**文件**: `home_flow_2604_mmb_id_all_seq_feat_v3_create_sync_onlinestore.py` (163 行)
+
+**角色**: 连接 FeatureStore PaaS 服务，创建序列特征视图并将离线 MaxCompute 数据同步到在线存储。
+
+```python
+# 核心调用链:
+fs = FeatureStoreClient(access_key_id, access_key_secret, endpoint='paifeaturestore-vpc.cn-shenzhen.aliyuncs.com')
+project = fs.get_project('feature_mall')
+
+# 创建序列特征视图 (如果不存在)
+cur_feature_view = project.create_sequence_feature_view(
+    name='home_flow_2604_mmb_id_all_seq_feat_v3',
+    datasource=MaxComputeDataSource(
+        table='home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_pre_t_agg_v1_agg'
+    ),
+    event_time='event_unix_time',          # ✓ 源表的 event_time 列名
+    item_id='item_id',
+    event='event',
+    deduplication_method=1,                # [mmb_id, item_id, event] 去重
+    sequence_feature_config=sequence_feature_config_list,  # 120 个列映射
+    sequence_table_config=SequenceTableConfig(             # 在线表配置
+        table_name='home_flow_2604_mmb_id_all_seq_feat_v3',
+        primary_key='mmb_id',
+        event_time='request_id'             # ⚠️ 见 14b 分析
+    ),
+    entity='user',
+    ttl=15552000  # ≈ 180天
+)
+
+# 同步数据
+task = cur_feature_view.publish_table(partitions={'dt': cur_day}, mode='Overwrite', direct_sync=True)
+```
+
+**120 个 SequenceFeatureConfig 的映射逻辑**:
+
+离线 v3 的 20 个属性列（item_id, cate_id_path, brand, ..., title_vector, ts）× 6 个序列长度（click_10, click_50, conversion_5, conversion_20, favorite_5, favorite_10）= 120 个 `offline_seq_name`。每个配置指定：
+
+- `offline_seq_name`: 离线 FS feature view 中该列的名称
+- `seq_event`: 行为类型过滤 (click / conversion / favorite)
+- `online_seq_name`: 在线序列名称，20 个属性共享同一个名称
+- `seq_len`: 序列最大长度
+
+**为什么 20 个属性列映射到同一个 online_seq_name**:
+
+FeatureStore 在线存储不以 120 列平铺方式存储，而是存为**结构化事件列表**:
+
+```
+离线 120 列:                                  在线结构化事件:
+click_10_seq__item_id:  "A;B;C"               click_10_seq = [
+click_10_seq__brand:    "Nike;Adidas;..."       {item_id:"A", brand:"Nike", cate_id_path:"...", ...},
+click_10_seq__cate_id_path: "..."               {item_id:"B", brand:"Adidas", ...},
+...                                              {item_id:"C", ...}
+                                              ]
+```
+
+**datasource 为何只需要 5 列**:
+
+datasource `pre_t_agg_v1_agg` 只含 `event_unix_time, event, item_id, scene, mmb_id` 5 列——这是**有意为之**。FS 的 `create_sequence_feature_view` 的工作方式是：
+
+1. 从 datasource 读取原始事件：只需 `event_unix_time`（排序/去重）、`event`（类型过滤）、`item_id`、`mmb_id`（分组键）
+1. 按 `mmb_id` 分组、按 `event_unix_time` 排序
+1. 在线查询时，FS 通过 `item_id` **自动关联 item feature view**，获取 `cate_id_path`, `brand`, `title_vector` 等商品属性
+1. 返回结构化事件列表给模型 FG 层
+
+所以 `SequenceFeatureConfig` 中声明 `cate_id_path`、`brand`、`title_vector` 等列，是在告诉 FS"在线序列中我需要这些字段，请从 item feature view 获取"，而非要求在 datasource 中存在。
+
+这种设计解耦了行为数据（聚合去重的 5 列）和商品属性数据（item feature view），避免了数据的冗余存储。
+
+**TTL**: `15552000` 秒 ≈ 180 天。FS 根据 event_time 字段判断数据年龄并自动淘汰过期数据。
+
+______________________________________________________________________
+
+### 14b. ⚠️ `SequenceTableConfig.event_time='request_id'` 配置错误分析
+
+#### 问题描述
+
+```python
+create_sequence_feature_view(
+    ...,
+    event_time='event_unix_time',    # line 159: ✓ 源表列名
+)
+
+seq_table_config = SequenceTableConfig(
+    ...,
+    event_time='request_id'          # line 156: ⚠️ 在线表列名
+)
+```
+
+两个 `event_time` 参数角色不同：
+
+| 参数位置                            | 作用                             | 当前值            | 正确性  |
+| ----------------------------------- | -------------------------------- | ----------------- | ------- |
+| `create_sequence_feature_view(...)` | 指定**源表**中哪列是事件时间戳   | `event_unix_time` | ✅ 正确 |
+| `SequenceTableConfig(...)`          | 指定**在线表**中事件时间列的名称 | `request_id`      | ⚠️ 错误 |
+
+#### 影响范围评估
+
+**业务逻辑: 不受影响** ✅
+
+`create_sequence_feature_view` 中的 `event_time='event_unix_time'` 才是决定以下关键行为的配置:
+
+| 行为                    | 配置来源                                                 | 影响                 | 正确性  |
+| ----------------------- | -------------------------------------------------------- | -------------------- | ------- |
+| 离线 Point-in-Time Join | `create_sequence_feature_view.event_time`                | 训练样本时间穿越防护 | ✅ 正确 |
+| 在线序列排序            | `create_sequence_feature_view.event_time`                | DIN 时间顺序         | ✅ 正确 |
+| 在线序列去重            | `create_sequence_feature_view.event_time` + dedup_method | 保留最新事件         | ✅ 正确 |
+
+原因是 FS 引擎读取 `pre_t_agg_v1_agg` 源表时，按 `event_time='event_unix_time'` 获取 `event_unix_time` 列的值（epoch 时间戳，如 `1718400000`），然后将该值写入在线表中名为 `request_id` 的列。在线表的**列名错了但值是对的**：
+
+```
+源表: event_unix_time=1718400000         ← 正确的值
+                           ↓
+在线表: request_id=1718400000            ← 列名错了，但值正确
+```
+
+因此按时间排序、去重、TTL 计算都基于正确的 epoch 值运行。
+
+**运维层面: 可能受影响** ⚠️
+
+在线存储引擎（Hologres/TableStore）的 TTL 清理依赖物理表结构来判断"哪列是时间"。如果引擎只看列名（`request_id`）而非值：
+
+- 列被推断为 `TEXT` → 无法与当前时间做比较 → **TTL 清理静默失效** → 在线存储数据无限膨胀
+- 列被推断为 `BIGINT` → 值本身就是有效时间戳 → TTL 碰巧正常工作
+
+**可维护性: 受影响** ⚠️
+
+在线序列查询结果中 event_time 字段名为 `request_id`:
+
+```json
+{
+  "click_10_seq": [
+    {"item_id": "A", "request_id": 1718400000, ...}
+  ]
+}
+```
+
+排查问题时可能被误认为是真正的请求 ID，造成混淆。
+
+#### 修复建议
+
+```python
+seq_table_config = SequenceTableConfig(
+    table_name='home_flow_2604_mmb_id_all_seq_feat_v3',
+    primary_key='mmb_id',
+    event_time='event_unix_time'    # ← 修正
+)
+```
+
+修改后重新执行 `publish_table(direct_sync=True)` 重建在线表的列名索引。
+
+______________________________________________________________________
+
+## 15. `pre_t_agg_v1_agg.sql` — 行为数据二次聚合（FS 同步专用）
+
+**文件**: `home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_pre_t_agg_v1_agg.sql` (56 行)
+
+**角色**: 从 `pre_t_agg_v1`（自身仅 5 列）的 180 天分区中做第二层去重截断，产出 Python sync 脚本的 FeatureStore 数据源。
+
+### 数据源全链
+
+```
+         ① preprocess_v1.sql         ② pre_t_agg_v1.sql           ③ pre_t_agg_v1_agg.sql
+原始ODPS ───────────→ preprocess_v1 ──────────→ pre_t_agg_v1 ───────────→ pre_t_agg_v1_agg
+行为日志  (10列, 当天)         (5列, 15天, 去重)         (5列, 180天, 再次去重)
+                                                                           │
+                                                                           ↓
+                                                               Python sync → FeatureStore
+```
+
+### 三级去重对比
+
+| 级别        | SQL                | 数据范围                                       | 去重键                     | 截断规则                  | 输出列  |
+| ----------- | ------------------ | ---------------------------------------------- | -------------------------- | ------------------------- | ------- |
+| L1 当天     | `preprocess_v1`    | dt = bizdate                                   | 无                         | 无                        | 10列    |
+| L2 聚合     | `pre_t_agg_v1`     | bizdate-14 ~ bizdate                           | `[mmb_id, item_id, event]` | click≤50, conv≤20, fav≤10 | **5列** |
+| L3 二次聚合 | `pre_t_agg_v1_agg` | bizdate-180 ~ bizdate 内用户最后活跃日往前15天 | `[mmb_id, item_id, event]` | 同上                      | **5列** |
+
+### `_agg` SQL 逻辑
+
+```sql
+CREATE TABLE ... LIKE home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_pre_t_agg_v1
+-- LIKE 继承 schema: 5 列 (event_unix_time, event, item_id, scene, mmb_id)
+
+INSERT OVERWRITE TABLE ..._agg PARTITION(dt='${bdp.system.bizdate}')
+SELECT sq2.event_unix_time, sq2.event, sq2.item_id, sq2.scene, sq2.mmb_id
+
+-- 内层: 180天分区, [mmb_id, item_id, event] 去重
+INNER JOIN (SELECT mmb_id, MAX(dt) user_last_dt FROM pre_t_agg_v1 ... GROUP BY mmb_id)
+  ON sq0.mmb_id = last_dt.mmb_id
+  AND sq0.dt > user_last_dt - 15   -- 只看用户最近活跃日往前15天
+
+-- 外层: [mmb_id, event] 截断 Top N
+WHERE rnk <= CASE event WHEN 'click' THEN 50 WHEN 'conversion' THEN 20 WHEN 'favorite' THEN 10 END
+```
+
+**schema 设计**: `pre_t_agg_v1` 的 schema 只有 5 列（`event_unix_time, event, item_id, scene, mmb_id`），`_agg` (LIKE) 继承相同 schema。`cate_id_path`, `brand`, `title_vector` 等商品属性不在此表中——它们由 FS 在线查询时通过 `item_id` 自动关联 item feature view 获取（详见 §14a 分析）。
+
+______________________________________________________________________
+
+## 16. 完整离线+在线架构总结
+
+### 16a. 三路数据管线
+
+```
+                    ┌──────────────────────────────────────┐
+                    │   SLS user-bhv-log (实时行为日志)       │
+                    └────────────────┬─────────────────────┘
+                                     │ Flink
+                   ┌─────────────────┼──────────────────┐
+                   ▼                 ▼                   │
+        ┌──────────────────┐ ┌──────────────────┐       │
+        │ all_seq_feat_v1  │ │ statistic_rt_v1  │       │
+        │ (原始事件)       │ │ (滑动窗口统计)    │       │ ODPS
+        └────────┬─────────┘ └────────┬─────────┘       │ 每日批次
+                 │                    │                  │
+                 ▼                    ▼                  ▼
+        ┌────────────────────────────────────────────────────┐
+        │              FeatureStore 在线特征存储              │
+        │  item_info | user_profile | rt_stat | seq_events  │
+        └────────────────────────────────────────────────────┘
+                          ▲
+                          │ create_sync_onlinestore.py
+                          │ (pre_t_agg_v1_agg 为数据源)
+                          │
+        ┌─────────────────┴────────────────────────────────┐
+        │             ODPS 离线批处理                       │
+        │  ① item_basic_info_preprocess_v3 (商品画像)       │
+        │  ② mmb_id_t_seq_v3 (当天行为序列)                 │
+        │  ③ mmb_id_pre_t_seq_v3 (前一天行为序列)           │
+        │  ④ mmb_id_all_seq_feat_v3 (合并为6种完整序列)     │
+        │  ⑤ fix_sample_v3 (组装训练样本)                    │
+        │  ⑥ fg_v3.json + pyfg_encoded_v3 (FG编码)        │
+        └─────────────────────────────────────────────────┘
+```
+
+### 16b. 文件职能总结
+
+| 文件 | 角色 | 输入 | 输出 | 运行方式 |
+|\---|---|---|---|---|---|
+| `preprocess_v1.sql` | 行为日志清洗 | 原始ODPS行为表 | `preprocess_v1` (10列) | ODPS 一日一次 |
+| `pre_t_agg_v1.sql` | 行为预聚合 | `preprocess_v1` 15天 | `pre_t_agg_v1` (5列) | ODPS 一日一次 |
+| `pre_t_agg_v1_agg.sql` | 行为二次聚合 | `pre_t_agg_v1` 180天 | `_agg` (5列) | ODPS 一日一次 |
+| `item_basic_info_preprocess_v3.sql` | 商品画像 | 原始商品表 + title_vector | `item_preprocess_v3` (30+列) | ODPS 一日一次 |
+| `mmb_id_t_seq_v3.sql` | 当天行为序列 | `preprocess_v1` + 商品画像 | `t_seq` (3种×21列) | ODPS 一日一次 |
+| `mmb_id_pre_t_seq_v3.sql` | 前一天行为序列 | `pre_t_agg_v1` + 商品画像 | `pre_t_seq` (6种×21列) | ODPS 一日一次 |
+| `mmb_id_all_seq_feat_v3.sql` | 序列合并 | `t_seq` + `pre_t_seq` | 完整序列 (120列) | ODPS 一日一次 |
+| `fix_sample_v3.sql` | 训练样本 | 曝光日志 + 各种特征 | `training_set` | ODPS 一日一次 |
+| `fg_v3.json` | FG 特征配置 | (声明式定义) | FG 编码规则 | pyfg101 引用 |
+| `pyfg_encoded_v3` | FG 执行器 | FG JSON | TFRecord | ODPS 一日一次 |
+| `_flink.sql` (seq) | 实时行为写 FS | SLS | FeatureStore raw events | Flink 流 |
+| `_flink.sql` (stat) | 实时统计特征 | SLS + item_info | FS rt_stat tables | Flink 流 |
+| `create_sync_onlinestore.py` | 离线→在线同步 | `_agg` (5列) | FS 在线序列视图 | ODPS Python |
+
+### 16c. 已知问题和注意事项
+
+| #   | 问题                                                                  | 文件                                | 影响                        | 修复优先级 |
+| --- | --------------------------------------------------------------------- | ----------------------------------- | --------------------------- | ---------- |
+| 1   | `SequenceTableConfig.event_time='request_id'`                         | `create_sync_onlinestore.py:156`    | 在线表列名错误，TTL可能失效 | 高         |
+| 2   | Flink SQL 硬编码 accessKey                                            | `_flink.sql:26-27` (两个文件)       | 安全风险                    | 高         |
+| 3   | `item_basic_info_preprocess_v3.sql` ALTER TABLE v1 表却写入 v3 schema | `item_basic_info_preprocess_v3.sql` | 建表/插表不匹配             | 中         |
+| 4   | 硬编码日期 `dt >= '20260604'`                                         | `item_basic_info_preprocess_v3.sql` | 定时任务过时失效            | 低         |

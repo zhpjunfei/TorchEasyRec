@@ -189,7 +189,24 @@ class BaseModel(BaseModule, metaclass=_meta_cls):
             else:
                 for child in m.children():
                     q.put(child)
-        return trainable_parameters_list, frozen_parameters_list
+        # Deduplicate by object identity to handle weight sharing
+        # (bag↔seq aliased params would otherwise be double-counted,
+        # causing apply_optimizer_in_backward to stamp the same tensor twice).
+        seen_ids = set()
+        deduped_trainable = []
+        for p in trainable_parameters_list:
+            pid = id(p)
+            if pid not in seen_ids:
+                seen_ids.add(pid)
+                deduped_trainable.append(p)
+        seen_ids.clear()
+        deduped_frozen = []
+        for p in frozen_parameters_list:
+            pid = id(p)
+            if pid not in seen_ids:
+                seen_ids.add(pid)
+                deduped_frozen.append(p)
+        return deduped_trainable, deduped_frozen
 
     def forward(self, batch: Batch) -> Dict[str, torch.Tensor]:
         """Predict the model."""

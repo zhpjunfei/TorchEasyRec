@@ -252,19 +252,21 @@ class EmbeddingGroup(nn.Module):
             # Collect bag embedding names (keyed by embedding_config.name).
             bag_names = set(bag_impl.ebc.embedding_bags.keys())
             if hasattr(bag_impl, "mc_ebc"):
-                bag_names.update(bag_impl.mc_ebc.embedding_bags.keys())
+                bag_names.update(
+                    bag_impl.mc_ebc._embedding_module.embedding_bags.keys()
+                )
             # Collect seq embedding names across all ec_dict (keyed by embedding_dim).
             seq_names = set()
             for ec in seq_impl.ec_dict.values():
                 seq_names.update(ec.embeddings.keys())
             for ec in seq_impl.mc_ec_dict.values():
-                seq_names.update(ec._ec.embeddings.keys())
+                seq_names.update(ec._embedding_module.embeddings.keys())
             # Find intersection → same name means "intended to be shared".
             for name in bag_names & seq_names:
                 bag_weight = (
                     bag_impl.ebc.embedding_bags[name].weight
                     if name in bag_impl.ebc.embedding_bags
-                    else bag_impl.mc_ebc.embedding_bags[name].weight
+                    else bag_impl.mc_ebc._embedding_module.embedding_bags[name].weight
                 )
                 for ec in seq_impl.ec_dict.values():
                     if name in ec.embeddings:
@@ -279,8 +281,8 @@ class EmbeddingGroup(nn.Module):
                             )
                         seq_emb.weight = bag_weight
                 for ec in seq_impl.mc_ec_dict.values():
-                    if name in ec._ec.embeddings:
-                        seq_emb = ec._ec.embeddings[name]
+                    if name in ec._embedding_module.embeddings:
+                        seq_emb = ec._embedding_module.embeddings[name]
                         if seq_emb.weight.shape != bag_weight.shape:
                             raise ValueError(
                                 f"Shared embedding [{name}] shape mismatch: "

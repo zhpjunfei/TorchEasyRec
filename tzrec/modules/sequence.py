@@ -91,7 +91,7 @@ class DINEncoder(SequenceEncoder):
         self._time_gate_dim = time_gate_dim
         self._content_seq_dim = sequence_dim - time_gate_dim
         if self._query_dim > self._content_seq_dim:
-            raise ValueError("query_dim > content_seq_dim not supported.")
+            self.query_proj = nn.Linear(self._query_dim, self._content_seq_dim)
         self.mlp = MLP(in_features=self._content_seq_dim * 4, dim=3, **attn_mlp)
         self.linear = nn.Linear(self.mlp.hidden_units[-1], 1)
         if time_gate_dim > 0:
@@ -126,7 +126,9 @@ class DINEncoder(SequenceEncoder):
             content_seq = sequence
             gate = None
 
-        if self._query_dim < self._content_seq_dim:
+        if hasattr(self, "query_proj"):
+            query = self.query_proj(query)
+        elif self._query_dim < self._content_seq_dim:
             query = F.pad(query, (0, self._content_seq_dim - self._query_dim))
         queries = query.unsqueeze(1).expand(-1, max_seq_length, -1)
 
