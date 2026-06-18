@@ -559,7 +559,9 @@ class EmbeddingGroup(nn.Module):
             for seq_encoder in seq_encoders:
                 output = seq_encoder(result)
                 new_feature.append(output)
-                result[f"{group_name}__seq_output__{seq_encoder.input()}"] = output
+                seq_feature_dict[f"{group_name}__seq_output__{seq_encoder.input()}"] = (
+                    output
+                )
             seq_feature_dict[group_name] = torch.cat(new_feature, dim=-1)
         return _update_dict_tensor(result, seq_feature_dict)
 
