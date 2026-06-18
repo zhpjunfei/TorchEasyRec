@@ -449,6 +449,8 @@ class PEPNetDCNPLE(MultiTaskRank):
 
         if self._contrastive_loss_enabled and "_ctr_behavior" in predictions:
             v = predictions["_ctr_behavior"]
+            if isinstance(v, torch.fx.Proxy):
+                return losses
             t = predictions["_ctr_title"]
             seq_len = predictions["_ctr_seq_len"]
             B = v.size(0)
