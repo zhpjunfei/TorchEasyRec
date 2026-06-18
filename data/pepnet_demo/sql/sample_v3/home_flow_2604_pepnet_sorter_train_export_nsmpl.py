@@ -20,7 +20,7 @@ dlc submit pytorchjob \
         torchrun --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
         --nnodes=$WORLD_SIZE --nproc-per-node=$NPROC_PER_NODE --node_rank=$RANK \
         -m tzrec.train_eval \
-        --pipeline_config_path /mnt/data/deploy/home_flow_2604_ctrcvr_sorter_v1/home_flow_2604_v10_title_vector.config \
+        --pipeline_config_path /mnt/data/deploy/home_flow_2604_ctrcvr_sorter_v1/home_flow_2604_v11_title_vector.config \
         --train_input_path odps://mmb_sage/tables/home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3/dt=${train_ymd} \
         --model_dir /mnt/data/deploy/home_flow_2604_ctrcvr_sorter_v1/pepnet_nsmpl/${train_ymd}
 

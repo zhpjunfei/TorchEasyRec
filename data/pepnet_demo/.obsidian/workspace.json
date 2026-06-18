@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "30-data/sample-v3-pipeline.md",
+                "file": "20-experiments/v11-contrastive-learning.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "sample-v3-pipeline"
+              "title": "v11-contrastive-learning"
             }
           }
         ]
@@ -185,21 +185,23 @@
   },
   "active": "46df841f2e74d7ec",
   "lastOpenFiles": [
-    "sql/sample_v3/home_flow_2604_ctrcvr_sorter_config_fg_v3ff.json",
-    "config/v10/home_flow_2604_v10_title_vector_silu.config",
-    "config/v10/home_flow_2604_v10_silu.config",
-    "config/v10/home_flow_2604_v10_baseline_silu.config",
-    "sql/sample_v3/home_flow_2604_pepnet_sorter_train_export_nsmpl.py",
-    "sql/sample_v3/home_flow_2604_ctrcvr_sorter_v6.py",
-    "config/home_flow_2604_pepnet_v4_cdot32_weight_long_v1f.config",
+    "99-archive/site_mapping.md",
+    "20-experiments/v11-contrastive-learning.md",
+    "docs/v11_title_vector_contrastive_design.md",
+    "sql/home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_30d_v3.sql",
+    "resources/Untitled-1.sql",
+    "30-data/sample-v3-pipeline.md",
+    "resources/1020597f-7c99-4f4f-83cd-f30be4b6bb3e_mBxK8g.pb",
+    "config/v11/home_flow_2604_v11_tmax_6700.config",
+    "config/v11/home_flow_2604_v11_f_req_page_dim4.config",
+    "config/v11/home_flow_2604_v11_silu.config",
+    "config/v11/home_flow_2604_v11_title_vector.config",
+    "config/v11/home_flow_2604_v11_baseline.config",
+    "config/v11/home_flow_2604_v11_title_vector_silu.config",
+    "config/v11",
     "20-experiments/v10-experiments.md",
-    "sql/sample_v3/home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_preprocess_v1.sql",
-    "sql/sample_v3/home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_pre_t_agg_v1.sql",
-    "sql/sample_v3/home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_pre_t_agg_v1_agg.sql",
-    "sql/sample_v3/home_flow_2604_mmb_id_all_seq_feat_v3_create_sync_onlinestore.py",
     "20-experiments/v7-ple-d-variants.md",
     "20-experiments/v7-control-weight.md",
-    "30-data/sample-v3-pipeline.md",
     "20-experiments/v9-experiments.md",
     "docs/v3_feature_pipeline.md",
     "20-experiments/v8-experiments.md",

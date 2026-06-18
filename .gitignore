@@ -54,3 +54,4 @@ docker/requirements*
 experiments/
 data/pepnet_demo/eval/data.csv
 data/pepnet_demo/train/data.csv
+data/pepnet_demo/resources/Untitled-1.sql
