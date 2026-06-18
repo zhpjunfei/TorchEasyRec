@@ -206,4 +206,7 @@ message PEPNetDCNPLE {
     repeated TaskTower task_towers = 16;
     // whether to add ctr logits to cvr
     optional bool cvr_add_ctr_logits = 17 [default = true];
+
+    // whether to enable contrastive learning (Phase 1a)
+    optional bool contrastive_loss_enabled = 18 [default = false];
 }

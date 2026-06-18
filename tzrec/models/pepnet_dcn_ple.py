@@ -9,9 +9,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from tzrec.datasets.utils import Batch
@@ -256,6 +258,51 @@ class PEPNetDCNPLE(MultiTaskRank):
 
         self._cvr_add_ctr_logits = self._model_config.cvr_add_ctr_logits
 
+        # --- Contrastive Learning (Phase 1a: column alignment) ---
+        self._contrastive_loss_weight = 0.1
+        self._contrastive_loss_enabled = self._model_config.contrastive_loss_enabled
+        self._contrastive_hard_k = 150
+        self._contrastive_logq_theta = 0.01
+        self._contrastive_metrics = {}
+
+        self._contrastive_din_output_dim = None
+        group_seq_encoders = getattr(
+            self.embedding_group, "_group_name_to_seq_encoders", {}
+        )
+        if "all" in group_seq_encoders:
+            for seq_encoder in group_seq_encoders["all"]:
+                if seq_encoder.input() == "click_50_seq":
+                    self._contrastive_din_output_dim = seq_encoder.output_dim()
+                    break
+        if self._contrastive_din_output_dim:
+            self.contrastive_behavior_proj = nn.Linear(
+                self._contrastive_din_output_dim, 128
+            )
+        else:
+            self.contrastive_behavior_proj = None
+        self.default_behavior = nn.Parameter(torch.zeros(128))
+
+        self._title_vector_idx = None
+        offset = 0
+        for name, dim in self.embedding_group.group_feature_dims("all").items():
+            if name == "title_vector":
+                self._title_vector_idx = (offset, offset + dim)
+                break
+            offset += dim
+
+        self._item_id_num_emb = None
+        for f in self._features:
+            if f.name == "item_id" and hasattr(f, "num_embeddings"):
+                self._item_id_num_emb = f.num_embeddings
+                break
+        if self._item_id_num_emb:
+            self.register_buffer(
+                "_log_q",
+                torch.full([self._item_id_num_emb], -math.log(self._item_id_num_emb)),
+            )
+        else:
+            self.register_buffer("_log_q", None)
+
     def _extract_bias(
         self, feature_tensors: List[torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -369,4 +416,95 @@ class PEPNetDCNPLE(MultiTaskRank):
             if tower_name == self._ctr_tower_name:
                 ctr_logits_val = tower_output
 
-        return self._multi_task_output_to_prediction(tower_outputs)
+        predictions = self._multi_task_output_to_prediction(tower_outputs)
+
+        if (
+            self.training
+            and self._contrastive_loss_enabled
+            and self.contrastive_behavior_proj is not None
+        ):
+            behavior_emb = grouped_features.get("all__seq_output__click_50_seq")
+            if behavior_emb is not None and self._title_vector_idx is not None:
+                v = self.contrastive_behavior_proj(behavior_emb)
+                t = grouped_features[self._main_group_name][
+                    :, self._title_vector_idx[0] : self._title_vector_idx[1]
+                ]
+                seq_len = grouped_features["click_50_seq.sequence_length"]
+                v = torch.where(
+                    (seq_len > 0).unsqueeze(1),
+                    v,
+                    self.default_behavior.unsqueeze(0).expand_as(v),
+                )
+                predictions["_ctr_behavior"] = v
+                predictions["_ctr_title"] = t
+                predictions["_ctr_seq_len"] = seq_len
+
+        return predictions
+
+    def loss(
+        self, predictions: Dict[str, torch.Tensor], batch: Batch
+    ) -> Dict[str, torch.Tensor]:
+        """Compute contrastive loss in addition to base task losses."""
+        losses = super().loss(predictions, batch)
+
+        if self._contrastive_loss_enabled and "_ctr_behavior" in predictions:
+            v = predictions["_ctr_behavior"]
+            t = predictions["_ctr_title"]
+            seq_len = predictions["_ctr_seq_len"]
+            B = v.size(0)
+
+            if self._log_q is not None:
+                kjt = batch.sparse_features.get("__BASE__")
+                if kjt is not None and "item_id_emb" in kjt.keys():
+                    item_ids = kjt["item_id_emb"].values().long()
+                    freq = torch.bincount(
+                        item_ids, minlength=self._item_id_num_emb
+                    ).float()
+                    batch_freq = freq / freq.sum()
+                    self._log_q.mul_(1 - self._contrastive_logq_theta).add_(
+                        self._contrastive_logq_theta, torch.log(batch_freq + 1e-8)
+                    )
+
+            v = F.normalize(v, dim=-1)
+            t = F.normalize(t, dim=-1)
+            tau = 0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())
+            sim = torch.mm(v, t.t()) / tau.unsqueeze(1)
+            sim_c = sim.clone()
+            if (
+                self._log_q is not None
+                and kjt is not None
+                and "item_id_emb" in kjt.keys()
+            ):
+                logq = self._log_q[item_ids].to(sim.device)
+                sim_c = sim_c - logq.unsqueeze(0)
+
+            sim_pos = sim.diag()
+            K = min(self._contrastive_hard_k, B - 1)
+            _, topk = torch.topk(sim_c, K + 1, dim=-1)
+            hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
+            hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
+            loss_v2t = -sim_pos + torch.logsumexp(
+                sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
+            )
+            loss_t2v = -sim_pos + torch.logsumexp(sim, dim=0)
+            loss = (loss_v2t + loss_t2v) / 2
+
+            mask = (seq_len >= 0).float()
+            if mask.sum() > 0:
+                losses["contrastive_loss"] = (
+                    (loss * mask).sum() / mask.sum() * self._contrastive_loss_weight
+                )
+
+            with torch.no_grad():
+                align = (v * t).sum(-1).mean().item()
+                neg_mask = ~hard_mask & ~torch.eye(B, dtype=torch.bool, device=v.device)
+                uniformity = (
+                    sim_c[neg_mask].exp().mean().log().item()
+                    if neg_mask.sum() > B
+                    else 0.0
+                )
+                self._contrastive_metrics.update(
+                    {"ctr_align": align, "ctr_uniform": uniformity}
+                )
+
+        return losses

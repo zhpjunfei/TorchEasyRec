@@ -49,12 +49,135 @@ raw_feature {
 
 ### 序列长度调节策略（连续 gating）
 
+#### 问题：为什么需要 gating？
+
+用户的历史行为序列长度从 0 到 50 不等（click_50_seq）：
+
+| seq_len 分布 | 占比     | 含义           |
+| ------------ | -------- | -------------- |
+| 0（空序列）  | ~2%      | 新用户或冷启动 |
+| 1-10         | ~14%     | 稀疏行为用户   |
+| 11-40        | ~18%     | 中等活跃用户   |
+| 41-50        | **~66%** | 高活跃用户     |
+
+DIN 输出质量随序列长度变化：
+
+- **seq_len=50**：DIN 有 50 个 item 可以加权聚合 → 行为表示稳定、信息丰富 → 可以接受对齐标题的细粒度约束
+- **seq_len=5**：DIN 只有 5 个 item → 行为表示方差大、噪声多 → 如果强行拉近到 title_vector，相当于让标题去拟合噪声
+- **seq_len=0**：DIN 输出全零向量 → 完全无信号
+
+**如果用一个固定的温度 τ=0.07 对所有序列做对比学习**：
+
+- 长序列：合理，对齐紧
+- 短序列：被强制对齐，行为表示被 title_vector 带偏 → **CTR/CVR 主任务受损**
+
+#### 解法：序列长度感知的温度调节
+
+InfoNCE 中的温度 τ 控制对负样本的区分力度：
+
+```
+L = -log( exp(pos/τ) / Σ exp(neg_i/τ) )
+
+τ 越小 → softmax 越尖锐 → 对比学习越"用力"（push/pull 梯度大）
+τ 越大 → softmax 越平滑 → 对比学习越"松弛"（梯度小，容忍噪声）
+```
+
+核心思路：**短序列 = 高噪声 → 大温度（松弛约束），长序列 = 低噪声 → 小温度（紧约束）**。
+
+#### 公式
+
 ```
 τ(seq_len) = τ_min + (τ_max - τ_min) · e^(-α · seq_len)
 ```
 
-- `τ_min = 0.07`，`τ_max = 0.5`，`α = 0.1`
-- seq_len=50 → τ≈0.073（强对齐），seq_len=10 → τ≈0.228（中等），seq_len=0 → τ≈0.5（弱）
+| 参数  | 值   | 含义                                             |
+| ----- | ---- | ------------------------------------------------ |
+| τ_min | 0.07 | 长序列极限温度（seq_len→∞），标准 InfoNCE 常用值 |
+| τ_max | 0.5  | 空序列温度（seq_len→0），松弛到几乎不约束        |
+| α     | 0.1  | 衰减速率，控制从短到长的过渡坡度                 |
+
+#### 效果曲线
+
+```
+τ(0)  = 0.07 + 0.43 × 1.0     = 0.500  弱约束（空序列兜底）
+τ(5)  = 0.07 + 0.43 × 0.607  ≈ 0.331  稀疏行为，松弛
+τ(10) = 0.07 + 0.43 × 0.368  ≈ 0.228  中等约束
+τ(20) = 0.07 + 0.43 × 0.135  ≈ 0.128  大部分可用信号
+τ(30) = 0.07 + 0.43 × 0.050  ≈ 0.091  接近全量约束
+τ(50) = 0.07 + 0.43 × 0.007  ≈ 0.073  几乎 τ_min
+```
+
+关键设计点：
+
+- **指数衰减**：seq_len 越短，温度上升越快。10→5 变宽松 0.228→0.331（+45%），10→20 变紧 0.228→0.128（-44%），对称合理
+- **e^(-α·seq_len)** 在 seq_len≥30 后 < 0.05 → 有效温度 ≈ τ_min，长序列统一强对齐
+- **τ_max=0.5**：seq_len=0 时 τ=0.5，对比学习几乎不起作用，相当于自动跳过空序列
+
+#### 温度 τ 如何控制约束强度
+
+InfoNCE 对正样本和负样本的梯度：
+
+```
+∂L/∂pos  = -(1 - p+) / τ       ← 把正样本拉近
+∂L/∂neg_i = p- / τ             ← 把负样本推远
+
+其中:
+  p+ = exp(pos/τ) / Z          ← 正样本 softmax 占比
+  p- = exp(neg_i/τ) / Z        ← 单个负样本 softmax 占比
+  Z  = exp(pos/τ) + Σ exp(neg_j/τ)
+```
+
+τ 通过两条路径影响梯度：**1/τ 放大幅度** + **p+ 控制选择性**。
+
+假设模型经过一定训练后 `pos=0.8, avg_neg=0.0, B=16000`：
+
+**τ=0.07 时：**
+
+```
+pos/0.07 = 11.4 → exp = 89866
+neg/0.07 = 0   → exp = 1
+Z = 89866 + 16000 × 1 = 105866
+p+ = 89866 / 105866 ≈ 0.85          # 85% 权重在正样本
+∂L/∂pos = -(1-0.85)/0.07 ≈ -2.14    # 梯度集中在正样本上
+∂L/∂neg ≈ (1/105866)/0.07 ≈ 1.35e-4 # 只有极少数 hard neg 有贡献
+```
+
+→ **约束紧**：正样本占 softmax 85%，模型能清晰区分正负 → 强烈驱动行为表示向 title_vector 对齐。
+
+**τ=0.5 时：**
+
+```
+pos/0.5 = 1.6 → exp = 4.95
+neg/0.5 = 0   → exp = 1
+Z = 4.95 + 16000 × 1 = 16005
+p+ = 4.95 / 16005 ≈ 0.00031         # 0.03% 在正样本，和随机无异
+∂L/∂pos = -(1-0.00031)/0.5 ≈ -2.00  # 正样本梯度和 τ=0.07 几乎一样大!
+∂L/∂neg ≈ (1/16005)/0.5 ≈ 1.25e-4  # 单个负样本梯度也和 τ=0.07 几乎一样
+```
+
+单看 `∂L/∂pos` 和 `∂L/∂neg` 的大小，τ=0.07 和 τ=0.5 **几乎一样**。那为什么说 τ=0.5 是弱约束？
+
+**关键区别在 p+ 的绝对值**：
+
+| τ    | p+    | loss = -log(p+) | 模型状态                           |
+| ---- | ----- | --------------- | ---------------------------------- |
+| 0.07 | 85%   | 0.16            | 已经高度确定哪个是正样本，只需微调 |
+| 0.5  | 0.03% | 8.10            | 完全不确定，正负混淆               |
+
+**τ 的真正作用是控制"对比半径"**：
+
+- τ=0.07：14x 放大镜。同 batch 16000 个负样本中，只有 top few hardest 的 softmax 权重非零。模型必须挑出"最难区分的那个负样本"来推远 → **选择性高，信息量大**
+- τ=0.5：2x 放大镜。所有 16000 个负样本的 softmax 权重 ≈ 均匀。加上 HardNegative K=150，top 150 的得分也相差无几。梯度被**平均分配**到大量负样本上，不给任何一个负样本明显推开的机会 → **没有选择性，信息量低**
+
+**直观理解**：τ 不是控制"梯度有多大"，而是控制"模型要区分多像的负样本"。τ=0.5 相当于告诉模型"你只要和正样本大概差不多就行，不用跟特定的负样本较劲"。短序列的行为本身就模糊（噪声大），给它一个大的对比半径，≈ 跳过对比约束。
+
+#### 和硬门控（if-else）的区别
+
+| 方案                                  | 代码                      | 效果                                                            |
+| ------------------------------------- | ------------------------- | --------------------------------------------------------------- |
+| if seq_len < N: skip contrastive loss | 5 行                      | 硬边界，seq_len=N±1 天差地别                                    |
+| 连续 gating（本方案）                 | 1 行 `τ(...)`             | 平滑过渡，seq_len=9 和 11 温度自然接近                          |
+| 序列长度作为 weight 乘 loss           | 1 行 `loss *= w(seq_len)` | 梯度量级改变，但 softmax 内部分布不变；温度同时改变梯度和选择性 |
 
 ______________________________________________________________________
 
@@ -161,24 +284,55 @@ ______________________________________________________________________
 
 ## 6. 对照业界标准的改进
 
-### P0：LogQ 修正
+### P0：LogQ 修正（Moving Average 版）
 
 **问题**：In-batch negatives 中热门 item 出现频率过高，模型学会"压热门"而非学语义差异。
+
+**关键洞察**：
+
+- item_id 是帖子，生存期 3-5 天，离线预计算频繁过期
+- LogQ 只需要区分"当前 batch 中 item 的相对热度"，不需要全局精确计数
+- **Moving Average** 方案：每个 step 从 batch 统计 item 即时频次，平滑更新 `log_q`
 
 **解法**：
 
 ```python
-# v2t 方向校正：s'_ij = s_ij / τ - log(p_j)
-# p_j = freq(item_j) in training data
-logq = self.item_logfreq[item_ids]  # [B]
-sim_corrected = sim_matrix - logq.unsqueeze(0)
+self.register_buffer("log_q", torch.full([NUM_BUCKETS], -math.log(NUM_BUCKETS)))
+# θ = 0.01 ~ 0.05, 极小动量只吸收 1% 新分布
 
-loss_v2t = -sim_pos + torch.logsumexp(sim_corrected, dim=-1)
+# 每步训练更新:
+input_ids = batch.sparse_features["__BASE__"]["item_id_emb"].values()
+freq = torch.bincount(input_ids, minlength=NUM_BUCKETS).float()
+batch_freq = freq / freq.sum()
+self.log_q.mul_(1 - theta).add_(theta, torch.log(batch_freq + 1e-8))
+
+# v2t 方向校正：
+logq = self.log_q[item_ids]
+sim_corrected = sim_matrix - logq.unsqueeze(0)
 # t2v 方向不做校正（behavior 采样不依赖 item 热度）
 loss_t2v = -sim_pos + torch.logsumexp(sim_matrix.t(), dim=-1)
 ```
 
-**预计算**：训练脚本遍历数据统计 `item_id` 频次，存为 `item_freq.pt`（shape=[hash_bucket_size]）。
+**参数**：
+
+| 参数        | 值          | 含义                                 |
+| ----------- | ----------- | ------------------------------------ |
+| NUM_BUCKETS | 3,000,000   | 与 `item_id` `hash_bucket_size` 一致 |
+| θ           | 0.01        | 每次 step 吸收 1% 新频率信息         |
+| 初始化      | `log(1/3M)` | 均匀先验                             |
+| ε           | 1/B         | batch 内最少出现 1 次的保底概率      |
+
+**与全量 SQL 方案对比**：
+
+| 维度     | 全量 SQL 方案                    | Moving Average（推荐） |
+| -------- | -------------------------------- | ---------------------- |
+| 精度     | θ=1（全量替换），精确到每个 item | θ=0.01，动量平滑近似   |
+| 时效性   | 帖子过期后必须重跑               | 随训练自动遗忘         |
+| 离线依赖 | SQL + Python mmh3 hash           | **无**                 |
+| 代码量   | 20 行 SQL + 15 行 Python         | **8 行模型内**         |
+| 覆盖     | 只覆盖预计算时存在的 item        | 3M bucket 全量覆盖     |
+
+**为什么 θ=0.01**：帖子寿命 ~3 天 ≈ 1/20 训练数据。θ=0.01 → 100 step 后旧信息占比 ≈ 37%，自然遗忘不需要手动管理 item 生命周期。
 
 ### P0：Hard Negative Mining
 
@@ -190,9 +344,11 @@ sim_hard = sim_corrected.masked_fill(~hard_mask, -inf)
 loss_v2t = -sim_pos + torch.logsumexp(sim_hard, dim=-1)
 ```
 
-| 参数                  | 起始值 | 范围 |
-| --------------------- | ------ | ---- |
-| `_contrastive_hard_k` | 10     | 5-30 |
+**K 选择依据**：有效 batch size = B × num_gpu = 4096 × 4 = 16384。√(16384) ≈ 128，取整为 150（≈0.9% 负样本）。实践参考：CLIP 32K 全量无筛选，MoCo 65536 取 top 2048（3%）。0.6~1.2% 在信息量和稳定性之间平衡。
+
+| 参数                  | 起始值 | 范围   | 理由                           |
+| --------------------- | ------ | ------ | ------------------------------ |
+| `_contrastive_hard_k` | 150    | 50-300 | 4卡×4K batch 取 top 150 ≈ 0.9% |
 
 ### P1：Stop-Gradient（Phase 2 必需）
 
@@ -227,37 +383,40 @@ ______________________________________________________________________
 #### 2a. `__init__()`（+20 行）
 
 ```python
-# 超参
-self._contrastive_loss_weight = 0.1
-self._contrastive_loss_enabled = True
-self._contrastive_hard_k = 10
+        # 超参
+        self._contrastive_loss_weight = 0.1
+        self._contrastive_loss_enabled = True
+        self._contrastive_hard_k = 150
+        self._contrastive_logq_theta = 0.01
 
-# 获取 DIN output_dim
-din_output_dim = None
-for seq_encoder in self.embedding_group._group_name_to_seq_encoders.get("all", []):
-    if seq_encoder.input() == "click_50_seq":
-        din_output_dim = seq_encoder.output_dim()
-        break
+        # 获取 DIN output_dim
+        din_output_dim = None
+        for seq_encoder in self.embedding_group._group_name_to_seq_encoders.get("all", []):
+            if seq_encoder.input() == "click_50_seq":
+                din_output_dim = seq_encoder.output_dim()
+                break
 
-self.contrastive_behavior_proj = nn.Linear(din_output_dim, 128) if din_output_dim else None
-self.default_behavior = nn.Parameter(torch.zeros(128))
+        self.contrastive_behavior_proj = nn.Linear(din_output_dim, 128) if din_output_dim else None
+        self.default_behavior = nn.Parameter(torch.zeros(128))
 
-# 计算 title_vector 在 "all" group 中的索引
-t_start, t_end = None, None
-offset = 0
-for name, dim in self.embedding_group.group_feature_dims("all").items():
-    if name == "title_vector":
-        self._title_vector_idx = (offset, offset + dim)
-    offset += dim
+        # 计算 title_vector 在 "all" group 中的索引
+        t_start, t_end = None, None
+        offset = 0
+        for name, dim in self.embedding_group.group_feature_dims("all").items():
+            if name == "title_vector":
+                self._title_vector_idx = (offset, offset + dim)
+            offset += dim
 
-# item_id embedding 名（用于 LogQ）
-self._item_id_emb_key = None
-for f in self._features:
-    if f.name == "item_id" and f.emb_bag_config:
-        self._item_id_emb_key = f.emb_bag_config.name
-        break
-
-self.register_buffer("item_logfreq", None)
+        # Moving Average LogQ: 初始化均匀先验
+        self._item_id_num_emb = None
+        for f in self._features:
+            if f.name == "item_id" and hasattr(f, "num_embeddings"):
+                self._item_id_num_emb = f.num_embeddings
+                break
+        if self._item_id_num_emb:
+            self.register_buffer(
+                "_log_q", torch.full([self._item_id_num_emb], -math.log(self._item_id_num_emb))
+            )
 ```
 
 #### 2b. `predict()`（+20 行）
@@ -278,16 +437,9 @@ if self.training and self._contrastive_loss_enabled and self.contrastive_behavio
             self.default_behavior.unsqueeze(0).expand_as(v),
         )
 
-        item_ids = None
-        if self._item_id_emb_key:
-            kjt = batch.sparse_features.get("__BASE__")
-            if kjt is not None and self._item_id_emb_key in kjt.keys():
-                item_ids = kjt[self._item_id_emb_key].to_padded_dense(1)[:, 0].long()
-
         predictions["_ctr_behavior"] = v
         predictions["_ctr_title"] = t
         predictions["_ctr_seq_len"] = seq_len
-        predictions["_ctr_item_ids"] = item_ids
 ```
 
 #### 2c. `loss()`（+25 行）
@@ -298,18 +450,28 @@ def loss(self, predictions, batch):
 
     if self._contrastive_loss_enabled and "_ctr_behavior" in predictions:
         v, t, seq_len = predictions["_ctr_behavior"], predictions["_ctr_title"], predictions["_ctr_seq_len"]
-        item_ids = predictions.get("_ctr_item_ids")
         B = v.size(0)
+
+        # Moving Average LogQ: 每步更新 item 频率分布
+        if self._log_q is not None:
+            kjt = batch.sparse_features.get("__BASE__")
+            if kjt is not None and "item_id_emb" in kjt.keys():
+                item_ids = kjt["item_id_emb"].values().long()
+                freq = torch.bincount(item_ids, minlength=self._log_q.size(0)).float()
+                batch_freq = freq / freq.sum()
+                self._log_q.mul_(1 - self._contrastive_logq_theta).add_(
+                    self._contrastive_logq_theta, torch.log(batch_freq + 1e-8)
+                )
 
         v, t = F.normalize(v, dim=-1), F.normalize(t, dim=-1)
         tau = 0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())
 
         sim = torch.mm(v, t.t()) / tau.unsqueeze(1)
 
-        # LogQ
+        # LogQ 校正（仅 v2t 方向）
         sim_c = sim.clone()
-        if item_ids is not None and self.item_logfreq is not None:
-            logq = self.item_logfreq[item_ids].to(sim.device)
+        if self._log_q is not None and kjt is not None and "item_id_emb" in kjt.keys():
+            logq = self._log_q[item_ids].to(sim.device)
             sim_c = sim_c - logq.unsqueeze(0)
 
         sim_pos = sim.diag()
@@ -345,20 +507,20 @@ def loss(self, predictions, batch):
 | ----------------------------------- | ------------------- | ------- | ------ |
 | 暴露单序列 DIN 输出                 | `embedding.py`      | 2       | **低** |
 | InfoNCE + gating + default_behavior | `pepnet_dcn_ple.py` | 20      | **低** |
-| LogQ correction                     | `pepnet_dcn_ple.py` | 10      | **低** |
+| LogQ correction (Moving Avg)        | `pepnet_dcn_ple.py` | 8       | **低** |
 | Hard negative mining                | `pepnet_dcn_ple.py` | 8       | **低** |
 | 诊断指标                            | `pepnet_dcn_ple.py` | 10      | **低** |
-| 预计算 item_freq                    | 训练脚本            | 10      | **低** |
-| **合计**                            | **3 files**         | **~60** | -      |
+| **合计**                            | **2 files**         | **~48** | -      |
 | Phase 1b: chaprice 辅助 view        | `.py`               | +5      | **低** |
 | Phase 2: 行对齐                     | config + .py        | +5      | **中** |
 | Phase 3: 连续 gating                | .py                 | +5      | **低** |
 
 ### 不需要改
 
-- data pipeline / SQL ✅
+- data pipeline / SQL / 离线预处理 ✅
 - 推理 / 导出配置 ✅
 - 基础模型结构 ✅
+- 配置文件 ✅
 
 ______________________________________________________________________
 
@@ -377,15 +539,15 @@ ______________________________________________________________________
 
 ### 8.2 风险矩阵（最终版）
 
-| 风险                                 | 概率     | 影响                    | 应对                                 | 残余风险 |
-| ------------------------------------ | -------- | ----------------------- | ------------------------------------ | -------- |
-| LogQ item_freq 与 hash 空间不一致    | **低**   | 查表越界                | `item_ids.clamp(0, N-1)`             | **极低** |
-| batch 中 item 高度重复 → hard neg 少 | **低**   | 退化到全量 softmax      | fallback: 无 hard neg 时用 full      | **低**   |
-| 温度 τ 对短序列压制过度              | **中**   | 对比学习在短序上 ≈ 无效 | 调 α / τ_min；短序本来信号弱，可接受 | **低**   |
-| Phase 2 表示坍缩                     | **低**   | 对比失效                | stop-gradient（已设计）+ 诊断监控    | **低**   |
-| `torch.fx` trace 新增 key            | **中**   | 导出失败                | export config 显式保留 key           | **中**   |
-| chaprice + title_vector 粒度不匹配   | **确定** | 预期增益有限            | 权重设为 0.3，不阻塞主 view          | **低**   |
-| DIN output_dim 变化                  | **极低** | 投影层维度不匹配        | `__init__` 预获取，建完不可变        | **无**   |
+| 风险                                 | 概率     | 影响                    | 应对                                         | 残余风险 |
+| ------------------------------------ | -------- | ----------------------- | -------------------------------------------- | -------- |
+| LogQ Moving Average 对罕见 item 偏差 | **低**   | 频率估计不准            | item 存活期短，动量自动遗忘                  | **极低** |
+| batch 中 item 高度重复 → hard neg 少 | **低**   | 退化到全量 softmax      | fallback: 无 hard neg 时用 full              | **低**   |
+| 温度 τ 对短序列压制过度              | **中**   | 对比学习在短序上 ≈ 无效 | 调 α / τ_min；短序本来信号弱，可接受         | **低**   |
+| Phase 2 表示坍缩                     | **低**   | 对比失效                | stop-gradient（已设计）+ 诊断监控            | **低**   |
+| `torch.fx` trace 训练分支死代码      | **极低** | 导出图含无用节点        | eliminate_dead_code 自动清除；无显式保留需要 | **极低** |
+| chaprice + title_vector 粒度不匹配   | **确定** | 预期增益有限            | 权重设为 0.3，不阻塞主 view                  | **低**   |
+| DIN output_dim 变化                  | **极低** | 投影层维度不匹配        | `__init__` 预获取，建完不可变                | **无**   |
 
 ### 8.3 详细 Roadmap
 
@@ -394,17 +556,7 @@ ______________________________________________________________________
 - [ ] 训练环境确认：PEPNet 训练管道 1.2.16+，`tzrec.models.pepnet_dcn_ple` 可单机 debug
 - [ ] config 确认：确认远端部署路径 `/mnt/data/deploy/home_flow_2604_ctrcvr_sorter_v1/` 有对应 v11 config
 
-#### Step 1：预计算 item_freq
-
-| 文件                                             | 改动               | 预期耗时       |
-| ------------------------------------------------ | ------------------ | -------------- |
-| 训练脚本 `*_pepnet_sorter_train_export_nsmpl.py` | +10 行数据遍历统计 | 1-2h（单次跑） |
-
-需输出：`item_freq.pt`（tensor, shape=[hash_bucket_size]）
-
-检查点：`torch.load("item_freq.pt").sum()` ≈ 1.0 ✅
-
-#### Step 2：修改 embedding.py
+#### Step 1：修改 embedding.py
 
 | 文件                         | 改动                                       | 行数 | 风险 |
 | ---------------------------- | ------------------------------------------ | ---- | ---- |
@@ -412,24 +564,24 @@ ______________________________________________________________________
 
 验证：`grouped_features["all__seq_output__click_50_seq"]` 返回 `[B, din_dim]` tensor
 
-#### Step 3：修改 pepnet_dcn_ple.py
+#### Step 2：修改 pepnet_dcn_ple.py
 
-| 子步骤                | 方法                             | 行数 |
-| --------------------- | -------------------------------- | ---- |
-| 3a. `__init__()` 尾部 | 注册 parameters + 计算索引       | +20  |
-| 3b. `predict()`       | 提取特征 + LogQ                  | +20  |
-| 3c. `loss()`          | InfoNCE + HardNegative + Metrics | +25  |
+| 子步骤                | 方法                                    | 行数 |
+| --------------------- | --------------------------------------- | ---- |
+| 2a. `__init__()` 尾部 | 注册 parameters + Moving Avg LogQ init  | +20  |
+| 2b. `predict()`       | 提取行为特征                            | +15  |
+| 2c. `loss()`          | InfoNCE + LogQ + HardNegative + Metrics | +25  |
 
 验证：单步 forward + backward 不报错，loss 输出含 `"contrastive_loss"`
 
-#### Step 4：训练 Phase 1a（click_50_seq 主 view）
+#### Step 3：训练 Phase 1a（click_50_seq 主 view）
 
-| 实验          | 配置                                   | 预期                           |
-| ------------- | -------------------------------------- | ------------------------------ |
-| Phase 1a      | baseline config + 改后的 pepnet        | train loss 含 contrastive_loss |
-|               | contrastive_loss_weight=0.1, hard_k=10 | alignment ≈ 0.2~0.8 之间波动   |
-|               |                                        | uniformity ≈ -1~-5 之间        |
-| baseline 对比 | 原始 v11_title_vector config           | 纯 CTR/CVR loss                |
+| 实验          | 配置                                    | 预期                           |
+| ------------- | --------------------------------------- | ------------------------------ |
+| Phase 1a      | baseline config + 改后的 pepnet         | train loss 含 contrastive_loss |
+|               | contrastive_loss_weight=0.1, hard_k=150 | alignment ≈ 0.2~0.8 之间波动   |
+|               |                                         | uniformity ≈ -1~-5 之间        |
+| baseline 对比 | 原始 v11_title_vector config            | 纯 CTR/CVR loss                |
 
 训练 2-3 epoch 后观察：
 
@@ -438,20 +590,20 @@ ______________________________________________________________________
 - [ ] Alignment 在 0.4-0.8（不坍缩）
 - [ ] Uniformity < -1.0（不发散）
 
-#### Step 5：决策门
+#### Step 4：决策门
 
 | 结果                   | 下一步                                          |
 | ---------------------- | ----------------------------------------------- |
 | ✅ AUC 不跌 + 诊断正常 | → Phase 1b（追加 chaprice）或 Phase 2（行对齐） |
 | ❌ AUC 跌或者诊断异常  | → 调参（weight/τ/K）或回退                      |
 
-#### Step 6（可选）：Phase 1b — chaprice 辅助 view
+#### Step 5（可选）：Phase 1b — chaprice 辅助 view
 
 - 预计 +5 行代码（loss() 中加第二路 InfoNCE）
 - weight=0.3，其余逻辑复用
 - 预期 CVR 额外 +0.05~0.1%
 
-#### Step 7（可选）：Phase 2 — 行对齐
+#### Step 6（可选）：Phase 2 — 行对齐
 
 - 配置改：`embedding_dim: 128`
 - 代码改：stop-gradient
@@ -463,19 +615,47 @@ ______________________________________________________________________
 ! 状态标记: ✅ 已完成 | 🔄 进行中 | ⏳ 待开始 | ❌ 阻塞/回退
 ```
 
-| 序号 | 任务                         | 文件/范围                            | 优先级 | 依赖  | 状态 | 备注                                  |
-| ---- | ---------------------------- | ------------------------------------ | ------ | ----- | ---- | ------------------------------------- |
-| 1    | 预计算 item_freq             | 训练脚本                             | P0     | —     | ⏳   | 需确认 hash_bucket_size               |
-| 2    | 修改 embedding.py（+2 行）   | `tzrec/modules/embedding.py:556-562` | P0     | —     | ⏳   |                                       |
-| 3a   | pepnet `__init__()` 注册参数 | `tzrec/models/pepnet_dcn_ple.py`     | P0     | —     | ⏳   | 需获取 DIN dim + TV idx + item_id key |
-| 3b   | pepnet `predict()` 提取特征  | 同上                                 | P0     | 3a    | ⏳   |                                       |
-| 3c   | pepnet `loss()` InfoNCE      | 同上                                 | P0     | 3b    | ⏳   | 含 LogQ + HardNegative + Metrics      |
-| 4    | 训练 Phase 1a                | 全部                                 | P0     | 1+2+3 | ⏳   | 2-3 epoch 验证                        |
-| 5    | 阶段评审                     | —                                    | P0     | 4     | ⏳   | 决策是否推进                          |
-| 6    | Phase 1b: chaprice 辅助 view | `pepnet_dcn_ple.py`                  | P2     | 4     | ⏳   | 可跳过                                |
-| 7    | Phase 2: 行对齐              | config + .py                         | P2     | 5     | ⏳   | 可跳过                                |
-| 8    | Phase 3: 双向 gating         | .py                                  | P3     | 7     | ⏳   | 可跳过                                |
+| 序号 | 任务                           | 文件/范围                            | 优先级 | 依赖 | 状态 | 备注                                        |
+| ---- | ------------------------------ | ------------------------------------ | ------ | ---- | ---- | ------------------------------------------- |
+| 1    | 修改 embedding.py（+2 行）     | `tzrec/modules/embedding.py:557-561` | P0     | —    | ✅   | 暴露 `{group}__seq_output__{seq}`           |
+| 2a   | pepnet `__init__()` Moving Avg | `tzrec/models/pepnet_dcn_ple.py`     | P0     | —    | ✅   | 含 LogQ init + DIN dim + TV idx + proj      |
+| 2b   | pepnet `predict()` 提取特征    | 同上                                 | P0     | 2a   | ✅   | behavior + title + seq_len 存入 predictions |
+| 2c   | pepnet `loss()` InfoNCE        | 同上                                 | P0     | 2b   | ✅   | 含 Moving Avg LogQ + HardNegative + Metrics |
+| 3    | 训练 Phase 1a                  | DLC 集群                             | P0     | 1+2  | ⏳   | 2-3 epoch 验证                              |
+| 4    | 阶段评审                       | —                                    | P0     | 3    | ⏳   | 决策是否推进                                |
+| 5    | Phase 1b: chaprice 辅助 view   | `pepnet_dcn_ple.py`                  | P2     | 3    | ⏳   | 可跳过                                      |
+| 6    | Phase 2: 行对齐                | config + .py                         | P2     | 4    | ⏳   | 可跳过                                      |
+| 7    | Phase 3: 双向 gating           | .py                                  | P3     | 6    | ⏳   | 可跳过                                      |
 
 ### 8.5 一句话结论
 
-**方案可行，风险可控。** 2 个文件、~60 行代码、0 个配置变更。三个关键理论缺陷（LogQ、HardNegative、诊断）已补齐，参考了 YouTube DNN / Google / Alibaba 的 production 实践。首次实施建议只跑 Phase 1a，用 click_50_seq 主 view 验证效果后再扩展。
+**方案可行，无需离线依赖。** 2 个文件、~48 行代码、0 个配置变更。 LogQ 使用 Moving Average 端到端学习 item 频率分布，随训练自动过期，不需要 SQL / 离线预处理。三个关键理论缺陷（Moving Avg LogQ、HardNegative、诊断）已补齐，参考了 YouTube DNN / Alibaba production 实践。首次实施只跑 Phase 1a，用 click_50_seq 主 view 验证效果后再扩展。
+
+______________________________________________________________________
+
+## 9. 实验指标
+
+### Epoch 0 对比（2026-06-18）
+
+各 v11 变体训练 7800 step 后指标：
+
+| 变体             | config 差异                                    | CTR AUC     | CVR AUC     | 相对 baseline              |
+| ---------------- | ---------------------------------------------- | ----------- | ----------- | -------------------------- |
+| **baseline**     | 原始 PEPNetDCNPLE                              | 0.71572     | 0.75489     | —                          |
+| **title_vector** | +title_vector feature, **无 contrastive loss** | **0.71574** | **0.75465** | CTR +0.00002, CVR -0.00024 |
+| tmax_6700        | +t_max=6700                                    | 0.71590     | 0.75496     | CTR +0.00018, CVR +0.00007 |
+| f_req_page_dim4  | +req_page dim=4                                | 0.71538     | 0.75440     | CTR -0.00034, CVR -0.00049 |
+| silu             | ReLU → SiLU                                    | 0.71538     | 0.75450     | CTR -0.00034, CVR -0.00039 |
+
+**关键结论**：
+
+1. **title_vector 本身对 AUC 无影响**（差异 < 0.0003，在随机波动范围内）→ 干净的对比基线
+1. **contrastive 训练应该对比 title_vector 而非 baseline**，排除 title_vector feature 本身的干扰
+1. 其他变体（tmax、f_req_page_dim4、silu）也无显著差异，v11 配置面基本收敛
+
+### 待跑实验
+
+| 实验                 | config                                                 | 预期                                          |
+| -------------------- | ------------------------------------------------------ | --------------------------------------------- |
+| Phase 1a contrastive | `home_flow_2604_v11_contrastive.config`                | train log 出现 contrastive_loss；CTR AUC 不跌 |
+|                      | （基于 title_vector + contrastive_loss_enabled: true） | alignment 0.2~0.8；uniformity -1~-5           |
