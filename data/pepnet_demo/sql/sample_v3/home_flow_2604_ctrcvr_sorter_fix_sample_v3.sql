@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3
     ,sqk_id                                                          STRING
     ,sub_title                                                       STRING
     ,username                                                        STRING
-    ,title_vector                                                    ARRAY<DOUBLE>
+    ,title_vector                                                    STRING
     ,gender__ratio_click_exposure_15d                                DOUBLE
     ,gender__ratio_conversion_click_15d                              DOUBLE
     ,gender__ratio_favorite_click_15d                                DOUBLE
@@ -925,6 +925,270 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3
     ,f_req_page                                                      STRING
     ,f_req_domain                                                    STRING
     ,f_req_month                                                     INT
+    ,search_click_100_seq__related_goods_ids                                                STRING
+    ,search_click_100_seq__brand                                                            STRING
+    ,search_click_100_seq__core_entity                                                      STRING
+    ,search_click_100_seq__first_cate_id                                                    STRING
+    ,search_click_100_seq__second_cate_id                                                   STRING
+    ,search_click_100_seq__third_cate_id                                                    STRING
+    ,search_click_100_seq__price_tag                                                        STRING
+    ,search_click_100_seq__site                                                             STRING
+    ,search_click_100_seq__spu_id                                                           STRING
+    ,search_click_100_seq__discount_intensity                                               STRING
+    ,search_click_100_seq__pinpaidengji                                                     STRING
+    ,search_click_100_seq__item_type                                                        STRING
+    ,search_click_50_seq__related_goods_ids                                                STRING
+    ,search_click_50_seq__brand                                                            STRING
+    ,search_click_50_seq__core_entity                                                      STRING
+    ,search_click_50_seq__first_cate_id                                                    STRING
+    ,search_click_50_seq__second_cate_id                                                   STRING
+    ,search_click_50_seq__third_cate_id                                                    STRING
+    ,search_click_50_seq__price_tag                                                        STRING
+    ,search_click_50_seq__site                                                             STRING
+    ,search_click_50_seq__spu_id                                                           STRING
+    ,search_click_50_seq__discount_intensity                                               STRING
+    ,search_click_50_seq__pinpaidengji                                                     STRING
+    ,search_click_50_seq__item_type                                                        STRING
+    ,search_click_10_seq__related_goods_ids                                                STRING
+    ,search_click_10_seq__brand                                                            STRING
+    ,search_click_10_seq__core_entity                                                      STRING
+    ,search_click_10_seq__first_cate_id                                                    STRING
+    ,search_click_10_seq__second_cate_id                                                   STRING
+    ,search_click_10_seq__third_cate_id                                                    STRING
+    ,search_click_10_seq__price_tag                                                        STRING
+    ,search_click_10_seq__site                                                             STRING
+    ,search_click_10_seq__spu_id                                                           STRING
+    ,search_click_10_seq__discount_intensity                                               STRING
+    ,search_click_10_seq__pinpaidengji                                                     STRING
+    ,search_click_10_seq__item_type                                                        STRING
+    ,like_50_seq__related_goods_ids                                                STRING
+    ,like_50_seq__brand                                                            STRING
+    ,like_50_seq__core_entity                                                      STRING
+    ,like_50_seq__first_cate_id                                                    STRING
+    ,like_50_seq__second_cate_id                                                   STRING
+    ,like_50_seq__third_cate_id                                                    STRING
+    ,like_50_seq__price_tag                                                        STRING
+    ,like_50_seq__site                                                             STRING
+    ,like_50_seq__spu_id                                                           STRING
+    ,like_50_seq__discount_intensity                                               STRING
+    ,like_50_seq__pinpaidengji                                                     STRING
+    ,like_50_seq__item_type                                                        STRING
+    ,chaprice_click_50_seq__related_goods_ids                                                STRING
+    ,chaprice_click_50_seq__brand                                                            STRING
+    ,chaprice_click_50_seq__core_entity                                                      STRING
+    ,chaprice_click_50_seq__first_cate_id                                                    STRING
+    ,chaprice_click_50_seq__second_cate_id                                                   STRING
+    ,chaprice_click_50_seq__third_cate_id                                                    STRING
+    ,chaprice_click_50_seq__price_tag                                                        STRING
+    ,chaprice_click_50_seq__site                                                             STRING
+    ,chaprice_click_50_seq__spu_id                                                           STRING
+    ,chaprice_click_50_seq__discount_intensity                                               STRING
+    ,chaprice_click_50_seq__pinpaidengji                                                     STRING
+    ,chaprice_click_50_seq__item_type                                                        STRING
+    ,order_100_seq__related_goods_ids                                                STRING
+    ,order_100_seq__brand                                                            STRING
+    ,order_100_seq__core_entity                                                      STRING
+    ,order_100_seq__first_cate_id                                                    STRING
+    ,order_100_seq__second_cate_id                                                   STRING
+    ,order_100_seq__third_cate_id                                                    STRING
+    ,order_100_seq__price_tag                                                        STRING
+    ,order_100_seq__site                                                             STRING
+    ,order_100_seq__spu_id                                                           STRING
+    ,order_100_seq__discount_intensity                                               STRING
+    ,order_100_seq__pinpaidengji                                                     STRING
+    ,order_100_seq__item_type                                                        STRING
+    ,order_50_seq__related_goods_ids                                                STRING
+    ,order_50_seq__brand                                                            STRING
+    ,order_50_seq__core_entity                                                      STRING
+    ,order_50_seq__first_cate_id                                                    STRING
+    ,order_50_seq__second_cate_id                                                   STRING
+    ,order_50_seq__third_cate_id                                                    STRING
+    ,order_50_seq__price_tag                                                        STRING
+    ,order_50_seq__site                                                             STRING
+    ,order_50_seq__spu_id                                                           STRING
+    ,order_50_seq__discount_intensity                                               STRING
+    ,order_50_seq__pinpaidengji                                                     STRING
+    ,order_50_seq__item_type                                                        STRING
+    ,order_10_seq__related_goods_ids                                                STRING
+    ,order_10_seq__brand                                                            STRING
+    ,order_10_seq__core_entity                                                      STRING
+    ,order_10_seq__first_cate_id                                                    STRING
+    ,order_10_seq__second_cate_id                                                   STRING
+    ,order_10_seq__third_cate_id                                                    STRING
+    ,order_10_seq__price_tag                                                        STRING
+    ,order_10_seq__site                                                             STRING
+    ,order_10_seq__spu_id                                                           STRING
+    ,order_10_seq__discount_intensity                                               STRING
+    ,order_10_seq__pinpaidengji                                                     STRING
+    ,order_10_seq__item_type                                                        STRING
+    ,user__cnt_favorite_60d                                           BIGINT
+    ,user__cnt_conversion_60d                                         BIGINT
+    ,user__cnt_click_60d                                              BIGINT
+    ,user__num_favorite_avg_current_price_60d                         DOUBLE
+    ,user__num_conversion_avg_current_price_60d                       DOUBLE
+    ,user__num_click_avg_current_price_60d                            DOUBLE
+    ,user__kv_cate_id_path_click_60d                                  MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_click_60d                             MAP<STRING,FLOAT>
+    ,user__kv_brand_click_60d                                         MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_click_60d                                 MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_click_60d                                MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_click_60d                                 MAP<STRING,FLOAT>
+    ,user__kv_price_tag_click_60d                                     MAP<STRING,FLOAT>
+    ,user__kv_site_click_60d                                          MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_click_60d                            MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_click_60d                                  MAP<STRING,FLOAT>
+    ,user__kv_item_type_click_60d                                     MAP<STRING,FLOAT>
+    ,user__kv_spu_id_click_60d                                        MAP<STRING,FLOAT>
+    ,user__kv_core_entity_click_60d                                   MAP<STRING,FLOAT>
+    ,user__kv_cate_id_path_conversion_60d                             MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_conversion_60d                        MAP<STRING,FLOAT>
+    ,user__kv_brand_conversion_60d                                    MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_conversion_60d                            MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_conversion_60d                           MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_conversion_60d                            MAP<STRING,FLOAT>
+    ,user__kv_price_tag_conversion_60d                                MAP<STRING,FLOAT>
+    ,user__kv_site_conversion_60d                                     MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_conversion_60d                       MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_conversion_60d                             MAP<STRING,FLOAT>
+    ,user__kv_item_type_conversion_60d                                MAP<STRING,FLOAT>
+    ,user__kv_spu_id_conversion_60d                                   MAP<STRING,FLOAT>
+    ,user__kv_core_entity_conversion_60d                              MAP<STRING,FLOAT>
+    ,user__kv_cate_id_path_favorite_60d                               MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_favorite_60d                          MAP<STRING,FLOAT>
+    ,user__kv_brand_favorite_60d                                      MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_favorite_60d                              MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_favorite_60d                             MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_favorite_60d                              MAP<STRING,FLOAT>
+    ,user__kv_price_tag_favorite_60d                                  MAP<STRING,FLOAT>
+    ,user__kv_site_favorite_60d                                       MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_favorite_60d                         MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_favorite_60d                               MAP<STRING,FLOAT>
+    ,user__kv_item_type_favorite_60d                                  MAP<STRING,FLOAT>
+    ,user__kv_spu_id_favorite_60d                                     MAP<STRING,FLOAT>
+    ,user__kv_core_entity_favorite_60d                                MAP<STRING,FLOAT>
+    ,user__cnt_favorite_360d                                          BIGINT
+    ,user__cnt_conversion_360d                                        BIGINT
+    ,user__cnt_click_360d                                             BIGINT
+    ,user__num_favorite_avg_current_price_360d                        DOUBLE
+    ,user__num_conversion_avg_current_price_360d                      DOUBLE
+    ,user__num_click_avg_current_price_360d                           DOUBLE
+    ,user__kv_cate_id_path_click_360d                                 MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_click_360d                            MAP<STRING,FLOAT>
+    ,user__kv_brand_click_360d                                        MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_click_360d                                MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_click_360d                               MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_click_360d                                MAP<STRING,FLOAT>
+    ,user__kv_price_tag_click_360d                                    MAP<STRING,FLOAT>
+    ,user__kv_site_click_360d                                         MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_click_360d                           MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_click_360d                                 MAP<STRING,FLOAT>
+    ,user__kv_item_type_click_360d                                    MAP<STRING,FLOAT>
+    ,user__kv_spu_id_click_360d                                       MAP<STRING,FLOAT>
+    ,user__kv_core_entity_click_360d                                  MAP<STRING,FLOAT>
+    ,user__kv_cate_id_path_conversion_360d                            MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_conversion_360d                       MAP<STRING,FLOAT>
+    ,user__kv_brand_conversion_360d                                   MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_conversion_360d                           MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_conversion_360d                          MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_conversion_360d                           MAP<STRING,FLOAT>
+    ,user__kv_price_tag_conversion_360d                               MAP<STRING,FLOAT>
+    ,user__kv_site_conversion_360d                                    MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_conversion_360d                      MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_conversion_360d                            MAP<STRING,FLOAT>
+    ,user__kv_item_type_conversion_360d                               MAP<STRING,FLOAT>
+    ,user__kv_spu_id_conversion_360d                                  MAP<STRING,FLOAT>
+    ,user__kv_core_entity_conversion_360d                             MAP<STRING,FLOAT>
+    ,user__kv_cate_id_path_favorite_360d                              MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_favorite_360d                         MAP<STRING,FLOAT>
+    ,user__kv_brand_favorite_360d                                     MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_favorite_360d                             MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_favorite_360d                            MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_favorite_360d                             MAP<STRING,FLOAT>
+    ,user__kv_price_tag_favorite_360d                                 MAP<STRING,FLOAT>
+    ,user__kv_site_favorite_360d                                      MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_favorite_360d                        MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_favorite_360d                              MAP<STRING,FLOAT>
+    ,user__kv_item_type_favorite_360d                                 MAP<STRING,FLOAT>
+    ,user__kv_spu_id_favorite_360d                                    MAP<STRING,FLOAT>
+    ,user__kv_core_entity_favorite_360d                               MAP<STRING,FLOAT>
+    ,user__ctr_60d                                                    DOUBLE
+    ,user__cvr_60d                                                    DOUBLE
+    ,user__cfr_60d                                                    DOUBLE
+    ,user__kv_related_goods_ids_ctr_60d                               MAP<STRING,FLOAT>
+    ,user__kv_brand_ctr_60d                                           MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_ctr_60d                                   MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_ctr_60d                                  MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_ctr_60d                                   MAP<STRING,FLOAT>
+    ,user__kv_price_tag_ctr_60d                                       MAP<STRING,FLOAT>
+    ,user__kv_site_ctr_60d                                            MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_ctr_60d                              MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_ctr_60d                                    MAP<STRING,FLOAT>
+    ,user__kv_item_type_ctr_60d                                       MAP<STRING,FLOAT>
+    ,user__kv_spu_id_ctr_60d                                          MAP<STRING,FLOAT>
+    ,user__kv_core_entity_ctr_60d                                     MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_cvr_60d                               MAP<STRING,FLOAT>
+    ,user__kv_brand_cvr_60d                                           MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_cvr_60d                                   MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_cvr_60d                                  MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_cvr_60d                                   MAP<STRING,FLOAT>
+    ,user__kv_price_tag_cvr_60d                                       MAP<STRING,FLOAT>
+    ,user__kv_site_cvr_60d                                            MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_cvr_60d                              MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_cvr_60d                                    MAP<STRING,FLOAT>
+    ,user__kv_item_type_cvr_60d                                       MAP<STRING,FLOAT>
+    ,user__kv_spu_id_cvr_60d                                          MAP<STRING,FLOAT>
+    ,user__kv_core_entity_cvr_60d                                     MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_cfr_60d                               MAP<STRING,FLOAT>
+    ,user__kv_brand_cfr_60d                                           MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_cfr_60d                                   MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_cfr_60d                                  MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_cfr_60d                                   MAP<STRING,FLOAT>
+    ,user__kv_price_tag_cfr_60d                                       MAP<STRING,FLOAT>
+    ,user__kv_site_cfr_60d                                            MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_cfr_60d                              MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_cfr_60d                                    MAP<STRING,FLOAT>
+    ,user__kv_item_type_cfr_60d                                       MAP<STRING,FLOAT>
+    ,user__kv_spu_id_cfr_60d                                          MAP<STRING,FLOAT>
+    ,user__kv_core_entity_cfr_60d                                     MAP<STRING,FLOAT>
+    ,user__ctr_360d                                                   DOUBLE
+    ,user__cvr_360d                                                   DOUBLE
+    ,user__cfr_360d                                                   DOUBLE
+    ,user__kv_related_goods_ids_ctr_360d                              MAP<STRING,FLOAT>
+    ,user__kv_brand_ctr_360d                                          MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_ctr_360d                                  MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_ctr_360d                                 MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_ctr_360d                                  MAP<STRING,FLOAT>
+    ,user__kv_price_tag_ctr_360d                                      MAP<STRING,FLOAT>
+    ,user__kv_site_ctr_360d                                           MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_ctr_360d                             MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_ctr_360d                                   MAP<STRING,FLOAT>
+    ,user__kv_item_type_ctr_360d                                      MAP<STRING,FLOAT>
+    ,user__kv_spu_id_ctr_360d                                         MAP<STRING,FLOAT>
+    ,user__kv_core_entity_ctr_360d                                    MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_cvr_360d                              MAP<STRING,FLOAT>
+    ,user__kv_brand_cvr_360d                                          MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_cvr_360d                                  MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_cvr_360d                                 MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_cvr_360d                                  MAP<STRING,FLOAT>
+    ,user__kv_price_tag_cvr_360d                                      MAP<STRING,FLOAT>
+    ,user__kv_site_cvr_360d                                           MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_cvr_360d                             MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_cvr_360d                                   MAP<STRING,FLOAT>
+    ,user__kv_item_type_cvr_360d                                      MAP<STRING,FLOAT>
+    ,user__kv_spu_id_cvr_360d                                         MAP<STRING,FLOAT>
+    ,user__kv_core_entity_cvr_360d                                    MAP<STRING,FLOAT>
+    ,user__kv_related_goods_ids_cfr_360d                              MAP<STRING,FLOAT>
+    ,user__kv_brand_cfr_360d                                          MAP<STRING,FLOAT>
+    ,user__kv_first_cate_id_cfr_360d                                  MAP<STRING,FLOAT>
+    ,user__kv_second_cate_id_cfr_360d                                 MAP<STRING,FLOAT>
+    ,user__kv_third_cate_id_cfr_360d                                  MAP<STRING,FLOAT>
+    ,user__kv_price_tag_cfr_360d                                      MAP<STRING,FLOAT>
+    ,user__kv_site_cfr_360d                                           MAP<STRING,FLOAT>
+    ,user__kv_discount_intensity_cfr_360d                             MAP<STRING,FLOAT>
+    ,user__kv_pinpaidengji_cfr_360d                                   MAP<STRING,FLOAT>
+    ,user__kv_item_type_cfr_360d                                      MAP<STRING,FLOAT>
+    ,user__kv_spu_id_cfr_360d                                         MAP<STRING,FLOAT>
+    ,user__kv_core_entity_cfr_360d                                    MAP<STRING,FLOAT>
 )
 PARTITIONED BY
 (
@@ -1018,7 +1282,7 @@ SELECT  sq0.event_unix_time
         ,sq55.sqk_id
         ,sq55.sub_title
         ,sq55.username
-        ,sq1.title_vector
+        ,sq55.title_vector
         ,sq42.gender__ratio_click_exposure_15d
         ,sq42.gender__ratio_conversion_click_15d
         ,sq42.gender__ratio_favorite_click_15d
@@ -1869,6 +2133,270 @@ SELECT  sq0.event_unix_time
         ELSE NULL
         END AS f_req_domain
         ,month(from_unixtime(sq0.event_unix_time)) AS f_req_month
+        ,sq57.search_click_100_seq__related_goods_ids
+        ,sq57.search_click_100_seq__brand
+        ,sq57.search_click_100_seq__core_entity
+        ,sq57.search_click_100_seq__first_cate_id
+        ,sq57.search_click_100_seq__second_cate_id
+        ,sq57.search_click_100_seq__third_cate_id
+        ,sq57.search_click_100_seq__price_tag
+        ,sq57.search_click_100_seq__site
+        ,sq57.search_click_100_seq__spu_id
+        ,sq57.search_click_100_seq__discount_intensity
+        ,sq57.search_click_100_seq__pinpaidengji
+        ,sq57.search_click_100_seq__item_type
+        ,sq57.search_click_50_seq__related_goods_ids
+        ,sq57.search_click_50_seq__brand
+        ,sq57.search_click_50_seq__core_entity
+        ,sq57.search_click_50_seq__first_cate_id
+        ,sq57.search_click_50_seq__second_cate_id
+        ,sq57.search_click_50_seq__third_cate_id
+        ,sq57.search_click_50_seq__price_tag
+        ,sq57.search_click_50_seq__site
+        ,sq57.search_click_50_seq__spu_id
+        ,sq57.search_click_50_seq__discount_intensity
+        ,sq57.search_click_50_seq__pinpaidengji
+        ,sq57.search_click_50_seq__item_type
+        ,sq57.search_click_10_seq__related_goods_ids
+        ,sq57.search_click_10_seq__brand
+        ,sq57.search_click_10_seq__core_entity
+        ,sq57.search_click_10_seq__first_cate_id
+        ,sq57.search_click_10_seq__second_cate_id
+        ,sq57.search_click_10_seq__third_cate_id
+        ,sq57.search_click_10_seq__price_tag
+        ,sq57.search_click_10_seq__site
+        ,sq57.search_click_10_seq__spu_id
+        ,sq57.search_click_10_seq__discount_intensity
+        ,sq57.search_click_10_seq__pinpaidengji
+        ,sq57.search_click_10_seq__item_type
+        ,sq57.like_50_seq__related_goods_ids
+        ,sq57.like_50_seq__brand
+        ,sq57.like_50_seq__core_entity
+        ,sq57.like_50_seq__first_cate_id
+        ,sq57.like_50_seq__second_cate_id
+        ,sq57.like_50_seq__third_cate_id
+        ,sq57.like_50_seq__price_tag
+        ,sq57.like_50_seq__site
+        ,sq57.like_50_seq__spu_id
+        ,sq57.like_50_seq__discount_intensity
+        ,sq57.like_50_seq__pinpaidengji
+        ,sq57.like_50_seq__item_type
+        ,sq57.chaprice_click_50_seq__related_goods_ids
+        ,sq57.chaprice_click_50_seq__brand
+        ,sq57.chaprice_click_50_seq__core_entity
+        ,sq57.chaprice_click_50_seq__first_cate_id
+        ,sq57.chaprice_click_50_seq__second_cate_id
+        ,sq57.chaprice_click_50_seq__third_cate_id
+        ,sq57.chaprice_click_50_seq__price_tag
+        ,sq57.chaprice_click_50_seq__site
+        ,sq57.chaprice_click_50_seq__spu_id
+        ,sq57.chaprice_click_50_seq__discount_intensity
+        ,sq57.chaprice_click_50_seq__pinpaidengji
+        ,sq57.chaprice_click_50_seq__item_type
+        ,sq57.order_100_seq__related_goods_ids
+        ,sq57.order_100_seq__brand
+        ,sq57.order_100_seq__core_entity
+        ,sq57.order_100_seq__first_cate_id
+        ,sq57.order_100_seq__second_cate_id
+        ,sq57.order_100_seq__third_cate_id
+        ,sq57.order_100_seq__price_tag
+        ,sq57.order_100_seq__site
+        ,sq57.order_100_seq__spu_id
+        ,sq57.order_100_seq__discount_intensity
+        ,sq57.order_100_seq__pinpaidengji
+        ,sq57.order_100_seq__item_type
+        ,sq57.order_50_seq__related_goods_ids
+        ,sq57.order_50_seq__brand
+        ,sq57.order_50_seq__core_entity
+        ,sq57.order_50_seq__first_cate_id
+        ,sq57.order_50_seq__second_cate_id
+        ,sq57.order_50_seq__third_cate_id
+        ,sq57.order_50_seq__price_tag
+        ,sq57.order_50_seq__site
+        ,sq57.order_50_seq__spu_id
+        ,sq57.order_50_seq__discount_intensity
+        ,sq57.order_50_seq__pinpaidengji
+        ,sq57.order_50_seq__item_type
+        ,sq57.order_10_seq__related_goods_ids
+        ,sq57.order_10_seq__brand
+        ,sq57.order_10_seq__core_entity
+        ,sq57.order_10_seq__first_cate_id
+        ,sq57.order_10_seq__second_cate_id
+        ,sq57.order_10_seq__third_cate_id
+        ,sq57.order_10_seq__price_tag
+        ,sq57.order_10_seq__site
+        ,sq57.order_10_seq__spu_id
+        ,sq57.order_10_seq__discount_intensity
+        ,sq57.order_10_seq__pinpaidengji
+        ,sq57.order_10_seq__item_type
+        ,sq58.user__cnt_favorite_60d
+        ,sq58.user__cnt_conversion_60d
+        ,sq58.user__cnt_click_60d
+        ,sq58.user__num_favorite_avg_current_price_60d
+        ,sq58.user__num_conversion_avg_current_price_60d
+        ,sq58.user__num_click_avg_current_price_60d
+        ,sq58.user__kv_cate_id_path_click_60d
+        ,sq58.user__kv_related_goods_ids_click_60d
+        ,sq58.user__kv_brand_click_60d
+        ,sq58.user__kv_first_cate_id_click_60d
+        ,sq58.user__kv_second_cate_id_click_60d
+        ,sq58.user__kv_third_cate_id_click_60d
+        ,sq58.user__kv_price_tag_click_60d
+        ,sq58.user__kv_site_click_60d
+        ,sq58.user__kv_discount_intensity_click_60d
+        ,sq58.user__kv_pinpaidengji_click_60d
+        ,sq58.user__kv_item_type_click_60d
+        ,sq58.user__kv_spu_id_click_60d
+        ,sq58.user__kv_core_entity_click_60d
+        ,sq58.user__kv_cate_id_path_conversion_60d
+        ,sq58.user__kv_related_goods_ids_conversion_60d
+        ,sq58.user__kv_brand_conversion_60d
+        ,sq58.user__kv_first_cate_id_conversion_60d
+        ,sq58.user__kv_second_cate_id_conversion_60d
+        ,sq58.user__kv_third_cate_id_conversion_60d
+        ,sq58.user__kv_price_tag_conversion_60d
+        ,sq58.user__kv_site_conversion_60d
+        ,sq58.user__kv_discount_intensity_conversion_60d
+        ,sq58.user__kv_pinpaidengji_conversion_60d
+        ,sq58.user__kv_item_type_conversion_60d
+        ,sq58.user__kv_spu_id_conversion_60d
+        ,sq58.user__kv_core_entity_conversion_60d
+        ,sq58.user__kv_cate_id_path_favorite_60d
+        ,sq58.user__kv_related_goods_ids_favorite_60d
+        ,sq58.user__kv_brand_favorite_60d
+        ,sq58.user__kv_first_cate_id_favorite_60d
+        ,sq58.user__kv_second_cate_id_favorite_60d
+        ,sq58.user__kv_third_cate_id_favorite_60d
+        ,sq58.user__kv_price_tag_favorite_60d
+        ,sq58.user__kv_site_favorite_60d
+        ,sq58.user__kv_discount_intensity_favorite_60d
+        ,sq58.user__kv_pinpaidengji_favorite_60d
+        ,sq58.user__kv_item_type_favorite_60d
+        ,sq58.user__kv_spu_id_favorite_60d
+        ,sq58.user__kv_core_entity_favorite_60d
+        ,sq59.user__cnt_favorite_360d
+        ,sq59.user__cnt_conversion_360d
+        ,sq59.user__cnt_click_360d
+        ,sq59.user__num_favorite_avg_current_price_360d
+        ,sq59.user__num_conversion_avg_current_price_360d
+        ,sq59.user__num_click_avg_current_price_360d
+        ,sq59.user__kv_cate_id_path_click_360d
+        ,sq59.user__kv_related_goods_ids_click_360d
+        ,sq59.user__kv_brand_click_360d
+        ,sq59.user__kv_first_cate_id_click_360d
+        ,sq59.user__kv_second_cate_id_click_360d
+        ,sq59.user__kv_third_cate_id_click_360d
+        ,sq59.user__kv_price_tag_click_360d
+        ,sq59.user__kv_site_click_360d
+        ,sq59.user__kv_discount_intensity_click_360d
+        ,sq59.user__kv_pinpaidengji_click_360d
+        ,sq59.user__kv_item_type_click_360d
+        ,sq59.user__kv_spu_id_click_360d
+        ,sq59.user__kv_core_entity_click_360d
+        ,sq59.user__kv_cate_id_path_conversion_360d
+        ,sq59.user__kv_related_goods_ids_conversion_360d
+        ,sq59.user__kv_brand_conversion_360d
+        ,sq59.user__kv_first_cate_id_conversion_360d
+        ,sq59.user__kv_second_cate_id_conversion_360d
+        ,sq59.user__kv_third_cate_id_conversion_360d
+        ,sq59.user__kv_price_tag_conversion_360d
+        ,sq59.user__kv_site_conversion_360d
+        ,sq59.user__kv_discount_intensity_conversion_360d
+        ,sq59.user__kv_pinpaidengji_conversion_360d
+        ,sq59.user__kv_item_type_conversion_360d
+        ,sq59.user__kv_spu_id_conversion_360d
+        ,sq59.user__kv_core_entity_conversion_360d
+        ,sq59.user__kv_cate_id_path_favorite_360d
+        ,sq59.user__kv_related_goods_ids_favorite_360d
+        ,sq59.user__kv_brand_favorite_360d
+        ,sq59.user__kv_first_cate_id_favorite_360d
+        ,sq59.user__kv_second_cate_id_favorite_360d
+        ,sq59.user__kv_third_cate_id_favorite_360d
+        ,sq59.user__kv_price_tag_favorite_360d
+        ,sq59.user__kv_site_favorite_360d
+        ,sq59.user__kv_discount_intensity_favorite_360d
+        ,sq59.user__kv_pinpaidengji_favorite_360d
+        ,sq59.user__kv_item_type_favorite_360d
+        ,sq59.user__kv_spu_id_favorite_360d
+        ,sq59.user__kv_core_entity_favorite_360d
+        ,sq60.user__ctr_60d
+        ,sq60.user__cvr_60d
+        ,sq60.user__cfr_60d
+        ,sq60.user__kv_related_goods_ids_ctr_60d
+        ,sq60.user__kv_brand_ctr_60d
+        ,sq60.user__kv_first_cate_id_ctr_60d
+        ,sq60.user__kv_second_cate_id_ctr_60d
+        ,sq60.user__kv_third_cate_id_ctr_60d
+        ,sq60.user__kv_price_tag_ctr_60d
+        ,sq60.user__kv_site_ctr_60d
+        ,sq60.user__kv_discount_intensity_ctr_60d
+        ,sq60.user__kv_pinpaidengji_ctr_60d
+        ,sq60.user__kv_item_type_ctr_60d
+        ,sq60.user__kv_spu_id_ctr_60d
+        ,sq60.user__kv_core_entity_ctr_60d
+        ,sq60.user__kv_related_goods_ids_cvr_60d
+        ,sq60.user__kv_brand_cvr_60d
+        ,sq60.user__kv_first_cate_id_cvr_60d
+        ,sq60.user__kv_second_cate_id_cvr_60d
+        ,sq60.user__kv_third_cate_id_cvr_60d
+        ,sq60.user__kv_price_tag_cvr_60d
+        ,sq60.user__kv_site_cvr_60d
+        ,sq60.user__kv_discount_intensity_cvr_60d
+        ,sq60.user__kv_pinpaidengji_cvr_60d
+        ,sq60.user__kv_item_type_cvr_60d
+        ,sq60.user__kv_spu_id_cvr_60d
+        ,sq60.user__kv_core_entity_cvr_60d
+        ,sq60.user__kv_related_goods_ids_cfr_60d
+        ,sq60.user__kv_brand_cfr_60d
+        ,sq60.user__kv_first_cate_id_cfr_60d
+        ,sq60.user__kv_second_cate_id_cfr_60d
+        ,sq60.user__kv_third_cate_id_cfr_60d
+        ,sq60.user__kv_price_tag_cfr_60d
+        ,sq60.user__kv_site_cfr_60d
+        ,sq60.user__kv_discount_intensity_cfr_60d
+        ,sq60.user__kv_pinpaidengji_cfr_60d
+        ,sq60.user__kv_item_type_cfr_60d
+        ,sq60.user__kv_spu_id_cfr_60d
+        ,sq60.user__kv_core_entity_cfr_60d
+        ,sq61.user__ctr_360d
+        ,sq61.user__cvr_360d
+        ,sq61.user__cfr_360d
+        ,sq61.user__kv_related_goods_ids_ctr_360d
+        ,sq61.user__kv_brand_ctr_360d
+        ,sq61.user__kv_first_cate_id_ctr_360d
+        ,sq61.user__kv_second_cate_id_ctr_360d
+        ,sq61.user__kv_third_cate_id_ctr_360d
+        ,sq61.user__kv_price_tag_ctr_360d
+        ,sq61.user__kv_site_ctr_360d
+        ,sq61.user__kv_discount_intensity_ctr_360d
+        ,sq61.user__kv_pinpaidengji_ctr_360d
+        ,sq61.user__kv_item_type_ctr_360d
+        ,sq61.user__kv_spu_id_ctr_360d
+        ,sq61.user__kv_core_entity_ctr_360d
+        ,sq61.user__kv_related_goods_ids_cvr_360d
+        ,sq61.user__kv_brand_cvr_360d
+        ,sq61.user__kv_first_cate_id_cvr_360d
+        ,sq61.user__kv_second_cate_id_cvr_360d
+        ,sq61.user__kv_third_cate_id_cvr_360d
+        ,sq61.user__kv_price_tag_cvr_360d
+        ,sq61.user__kv_site_cvr_360d
+        ,sq61.user__kv_discount_intensity_cvr_360d
+        ,sq61.user__kv_pinpaidengji_cvr_360d
+        ,sq61.user__kv_item_type_cvr_360d
+        ,sq61.user__kv_spu_id_cvr_360d
+        ,sq61.user__kv_core_entity_cvr_360d
+        ,sq61.user__kv_related_goods_ids_cfr_360d
+        ,sq61.user__kv_brand_cfr_360d
+        ,sq61.user__kv_first_cate_id_cfr_360d
+        ,sq61.user__kv_second_cate_id_cfr_360d
+        ,sq61.user__kv_third_cate_id_cfr_360d
+        ,sq61.user__kv_price_tag_cfr_360d
+        ,sq61.user__kv_site_cfr_360d
+        ,sq61.user__kv_discount_intensity_cfr_360d
+        ,sq61.user__kv_pinpaidengji_cfr_360d
+        ,sq61.user__kv_item_type_cfr_360d
+        ,sq61.user__kv_spu_id_cfr_360d
+        ,sq61.user__kv_core_entity_cfr_360d
 FROM    (
             SELECT  *
             FROM    home_flow_2604_ctrcvr_sorter_label_table_v1
@@ -1903,24 +2431,54 @@ ON      sq0.mmb_id = sq56.mmb_id
 AND     sq0.request_id = sq56.request_id
 LEFT JOIN   (
                 SELECT  *
+                FROM    home_flow_2604_mmb_id_other_bhv_pre_t_seq_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq57
+ON      sq0.mmb_id = sq57.mmb_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_mmb_id_static_feat_60d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq58
+ON      sq0.mmb_id = sq58.mmb_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_mmb_id_static_feat_360d_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq59
+ON      sq0.mmb_id = sq59.mmb_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_mmb_id_static_feat_60d_ctr_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq60
+ON      sq0.mmb_id = sq60.mmb_id
+LEFT JOIN   (
+                SELECT  *
+                FROM    home_flow_2604_mmb_id_static_feat_360d_ctr_v1
+                WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+            ) sq61
+ON      sq0.mmb_id = sq61.mmb_id
+LEFT JOIN   (
+                SELECT  *
                 FROM    home_flow_2604_mmb_id_static_feat_15d_v1
                 WHERE   dt = TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
             ) sq45
 ON      sq0.mmb_id = sq45.mmb_id
-LEFT JOIN   (
-                SELECT  item_id, title_vector
-                FROM    (
-                            SELECT  item_id
-                                    ,title_vector
-                                    ,ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY fs_write_time DESC) AS write_order
-                            FROM    feature_mall_feed_rec_flow_item_title_embedding_v5_offline
-                            WHERE   dt >= '20260604'
-                            AND     dt <= TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
-                            AND     title_vector IS NOT NULL
-                        ) t
-                WHERE   write_order = 1
-            ) sq1
-ON      sq0.item_id = sq1.item_id
+-- LEFT JOIN   (
+--                 SELECT  item_id, title_vector
+--                 FROM    (
+--                             SELECT  item_id
+--                                     ,title_vector
+--                                     ,ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY fs_write_time DESC) AS write_order
+--                             FROM    feature_mall_feed_rec_flow_item_title_embedding_v5_offline
+--                             WHERE   dt >= '20260604'
+--                             AND     dt <= TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+--                             AND     title_vector IS NOT NULL
+--                         ) t
+--                 WHERE   write_order = 1
+--             ) sq1
+-- ON      sq0.item_id = sq1.item_id
 LEFT JOIN   (
                 SELECT  *
                 FROM    home_flow_2604_item_id_static_feat_15d_v1
@@ -1941,7 +2499,7 @@ LEFT JOIN   (
 ON      sq0.item_id = sq43.item_id
 LEFT JOIN   (
                 SELECT  *
-                FROM    home_flow_2604_ads_log_zhekou_rec_item_basic_info_preprocess_v1
+                FROM    home_flow_2604_ads_log_zhekou_rec_item_basic_info_preprocess_v3
                 WHERE   dt = '${bdp.system.bizdate}'
             ) sq55
 ON      sq0.item_id = sq55.item_id

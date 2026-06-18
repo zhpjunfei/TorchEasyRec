@@ -185,6 +185,7 @@
   },
   "active": "46df841f2e74d7ec",
   "lastOpenFiles": [
+    "sql/sample_v3/home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_30d_v3.sql",
     "99-archive/site_mapping.md",
     "20-experiments/v11-contrastive-learning.md",
     "docs/v11_title_vector_contrastive_design.md",
@@ -219,7 +220,6 @@
     "40-errors/error-6-frontmatter-fragmentation.md",
     "20-experiments/eval-pipeline-fix.md",
     "99-archive/feature_understanding.md",
-    "30-data/sample-v2-7d.md",
-    "00-index/测试文件.md"
+    "30-data/sample-v2-7d.md"
   ]
 }
