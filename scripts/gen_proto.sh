@@ -20,4 +20,4 @@ if [ ! -d protoc ]; then
     tar xf ${PROTO_DIR}/protoc-gen-doc_${VERSION}.tar.gz -C ${PROTO_DIR}
 fi
 
-python -m grpc_tools.protoc -I . tzrec/protos/*.proto tzrec/protos/models/*.proto  --python_out=. --pyi_out=. --doc_out=html,proto.html:docs/source --plugin=protoc-gen-doc=./${PROTO_DIR}/protoc-gen-doc
+python3 -m grpc_tools.protoc -I . tzrec/protos/*.proto tzrec/protos/models/*.proto  --python_out=. --pyi_out=. --doc_out=html,proto.html:docs/source --plugin=protoc-gen-doc=./${PROTO_DIR}/protoc-gen-doc

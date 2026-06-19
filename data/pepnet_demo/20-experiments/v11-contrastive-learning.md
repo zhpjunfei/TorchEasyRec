@@ -71,7 +71,7 @@ loss_v2t ≈ -sim[i,i] + logsumexp(sim_c[hard])
 
 **修复**：`sim_pos = sim_c.diag()`（LogQ 校正后再取对角），收敛后 loss ≈ 0。
 
-#### 问题 4（新发现）：t2v 误用 dim=-1 行方向
+#### 问题 3：t2v 误用 dim=-1 行方向
 
 评审发现 t2v 使用 `dim=-1`（行方向），和 v2t 完全一样：对每个行为 v[i] 从所有标题中找正样本 `t[i]`。这不是真正的 t2v。
 
@@ -84,33 +84,42 @@ loss_v2t ≈ -sim[i,i] + logsumexp(sim_c[hard])
 
 **修复**：t2v HardNegative + logsumexp 用 `dim=0`。
 
-#### 问题 3：per-row τ 破坏 sim 对称性
+#### 问题 4：per-row τ 破坏 sim 对称性
 
 `sim = raw_sim / τ.unsqueeze(1)` 中 τ 按行（seq_len）变化，但 t2v 每次遍历列标题向量——标题的置信度与 seq_len 无关。
 
 **修复**：v2t 用 per-seq_len τ（行为置信度依赖 seq_len），t2v 用固定 τ=0.07（标题向量恒为 Qwen3 128d）。
 
-**发现：t2v 方向是 dim=0 列方向，不是 dim=-1 行方向**
+#### 问题 5：正样本可能不在 HardNegative 的 topk 中
 
-评审发现第四条——t2v 当前实现也是 `dim=-1`（行方向），和 v2t 完全相同。即对每个行为 v[i] 从所有标题中找正样本，只是温度不同。这等于把相同的对比信号重复了两遍，失去了对称 InfoNCE 中"对每个标题找匹配行为"的收益。
+`topk` 选择相似度最高的 K+1 个元素。训练初期 `v[i]·t[j] ∼ N(0, 1/128)`，对角线 `sim[i,i]` 并不比非对角线大——落入 top K+1 的概率 ≈ `(K+1)/B`。B=16384, K=150 时仅 **0.9%**。
 
-**修复**：t2v HardNegative + logsumexp 改用 `dim=0`（列方向）：
+当正样本不在 hard mask 中时，logsumexp 只包含负样本，`-sim_pos + logsumexp(仅负样本)` 的梯度缺乏"推远最像正样本的负样本"这一对比核心。
 
-```
-每列 j: 对标题 t[j] → 从所有行为 v[0..B-1] 中挑出匹配的正样本 v[j] 和 hardest 行为负样本
-```
+虽然训练几轮后对齐会改善，但 **title_vector 是 pass-through，梯度不能修改它**，所有学习压力都在 behavior 投影层一侧。无法保证对角线必定成为最大值。
 
-#### 四个修复统一效果
+**修复**：topk 后强行把对角线加入 hard mask：
 
-```
-v2t: sim_v2t = raw_sim / τ(seq_len) - logq    → HardNegative dim=-1, K=150
-t2v: sim_t2v = raw_sim / 0.07                  → HardNegative dim=0,  K=150
-sim_pos_v2t = sim_c.diag()    # LogQ 校正
-sim_pos_t2v = sim_t2v.diag()
-loss = (loss_v2t + loss_t2v) / 2    ← 对称 InfoNCE，两方向互补
+```python
+hard_mask[torch.arange(B), torch.arange(B)] = True       # v2t
+hard_mask_t2v[torch.arange(B), torch.arange(B)] = True   # t2v
 ```
 
-**确认：loss 方向修正后不会导致 `contrastive_loss` 回传异常。** 两个方向分开计算 `-sim_pos + logsumexp(hard)`，每个方向各有 ~K+1 项 logsumexp，loss 量级匹配。
+从第一步起 logsumexp 一定包含正样本，标准 InfoNCE `-log(p+ / (p+ + Σ p_neg))` 无条件成立。
+
+#### 五个修复统一效果
+
+```
+    v2t                                t2v
+sim_v2t = raw_sim / τ(seq_len) - logq    sim_t2v = raw_sim / 0.07
+HardNegative dim=-1, K=150               HardNegative dim=0, K=150
+pos in hard_mask: ✓ (强制保留对角)       pos in hard_mask: ✓ (强制保留对角)
+sim_pos = sim_c.diag() (#LogQ校正)        sim_pos = sim_t2v.diag()
+
+loss = (loss_v2t + loss_t2v) / 2
+```
+
+**确认：loss 方向修正后不会导致 `contrastive_loss` 回传异常。** 两个方向分开计算 `-sim_pos + logsumexp(hard)`，每个方向各有 ~K+1 项 logsumexp（对角始终在内），loss 量级匹配。
 
 ### 序列长度调节策略（连续 gating）
 
@@ -660,6 +669,8 @@ ______________________________________________________________________
 | t2v 全量 16K softmax 无效            | **确定** | t2v loss ≈ 噪声底       | 已修复：t2v 改为 HardNegative K=150          | **已修** |
 | `sim_pos` 未 LogQ → loss 偏差        | **确定** | 收敛时 loss → -logq     | 已修复：`sim_pos = sim_c.diag()`             | **已修** |
 | per-row τ 破坏 sim 对称性            | **确定** | loss surface 不对称     | 已修复：v2t/t2v 拆独立 sim 矩阵              | **已修** |
+| t2v 误用 dim=-1 行方向               | **确定** | 失去对称 InfoNCE 收益   | 已修复：t2v 改为 dim=0 列方向                | **已修** |
+| 正样本不在 HardNegative topk 中      | **确定** | 退化到无正样本对比      | 已修复：`hard_mask[i,i]=True` 强制保底       | **已修** |
 | Phase 2 表示坍缩                     | **低**   | 对比失效                | stop-gradient（已设计）+ 诊断监控            | **低**   |
 | `torch.fx` trace 训练分支死代码      | **极低** | 导出图含无用节点        | eliminate_dead_code 自动清除；无显式保留需要 | **极低** |
 | chaprice + title_vector 粒度不匹配   | **确定** | 预期增益有限            | 权重设为 0.3，不阻塞主 view                  | **低**   |
@@ -736,7 +747,7 @@ ______________________________________________________________________
 | 1    | 修改 embedding.py（+2 行）     | `tzrec/modules/embedding.py:557-561` | P0     | —    | ✅   | 暴露 `{group}__seq_output__{seq}`                                        |
 | 2a   | pepnet `__init__()` Moving Avg | `tzrec/models/pepnet_dcn_ple.py`     | P0     | —    | ✅   | 含 LogQ init + DIN dim + TV idx + proj                                   |
 | 2b   | pepnet `predict()` 提取特征    | 同上                                 | P0     | 2a   | ✅   | behavior + title + seq_len 存入 predictions                              |
-| 2c   | pepnet `loss()` InfoNCE        | 同上                                 | P0     | 2b   | ✅   | 含 Moving Avg LogQ + HardNegative + Metrics; **评审后修复 3 个耦合问题** |
+| 2c   | pepnet `loss()` InfoNCE        | 同上                                 | P0     | 2b   | ✅   | 含 Moving Avg LogQ + HardNegative + Metrics; **评审后修复 5 个设计问题** |
 | 3    | 训练 Phase 1a                  | DLC 集群                             | P0     | 1+2  | ⏳   | 2-3 epoch 验证                                                           |
 | 4    | 阶段评审                       | —                                    | P0     | 3    | ⏳   | 决策是否推进                                                             |
 | 5    | Phase 1b: chaprice 辅助 view   | `pepnet_dcn_ple.py`                  | P2     | 3    | ⏳   | 可跳过                                                                   |
@@ -745,7 +756,7 @@ ______________________________________________________________________
 
 ### 8.5 一句话结论
 
-**方案可行，无需离线依赖。** 2 个文件、~57 行代码、0 个配置变更。 LogQ 使用 Moving Average 端到端学习 item 频率分布，随训练自动过期，不需要 SQL / 离线预处理。三个关键理论缺陷（Moving Avg LogQ、HardNegative、诊断）已补齐，评审发现三个设计耦合问题（t2v 16K 无效、sim_pos 未矫正、τ 不对称）已全部修复。首次实施只跑 Phase 1a，用 click_50_seq 主 view 验证效果后再扩展。
+**方案可行，无需离线依赖。** 2 个文件、~60 行代码、0 个配置变更。 LogQ 使用 Moving Average 端到端学习 item 频率分布，随训练自动过期，不需要 SQL / 离线预处理。评审发现并修复 **5 个设计问题**：(1) t2v 全量 16K softmax 无效 → HardNegative; (2) `sim_pos` 未 LogQ 校正 → `sim_c.diag()`; (3) 共享 τ 破坏对称性 → 独立 sim; (4) t2v 误用 dim=-1 → dim=0; (5) 对角线可能不在 topk → 强制保留。首次实施只跑 Phase 1a，用 click_50_seq 主 view 验证效果后再扩展。
 
 ______________________________________________________________________
 
