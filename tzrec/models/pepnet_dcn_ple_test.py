@@ -60,13 +60,16 @@ class PEPNetDCNPLEContrastiveTest(unittest.TestCase):
             sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
         )
 
-        # t2v: fixed τ + HardNegative
+        # t2v: fixed τ + HardNegative（列方向 dim=0）
         sim_t2v = raw_sim / 0.07
-        _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=-1)
+        _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
         hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
-        hard_mask_t2v[torch.arange(B).unsqueeze(1), topk_t2v] = True
+        hard_mask_t2v[
+            topk_t2v,
+            torch.arange(B).unsqueeze(0).expand(K + 1, -1),
+        ] = True
         loss_t2v = -sim_t2v.diag() + torch.logsumexp(
-            sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=-1
+            sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
         )
 
         return (loss_v2t + loss_t2v) / 2
@@ -94,10 +97,10 @@ class PEPNetDCNPLEContrastiveTest(unittest.TestCase):
         lv = -sim_v2t.diag() + torch.logsumexp(sim_v2t.masked_fill(~hm, -1e9), dim=-1)
 
         sim_t2v = raw_sim / 0.07
-        _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=-1)
+        _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
         hm2 = torch.zeros_like(sim_t2v, dtype=torch.bool)
-        hm2[torch.arange(8).unsqueeze(1), topk_t2v] = True
-        lt = -sim_t2v.diag() + torch.logsumexp(sim_t2v.masked_fill(~hm2, -1e9), dim=-1)
+        hm2[topk_t2v, torch.arange(8).unsqueeze(0).expand(K + 1, -1)] = True
+        lt = -sim_t2v.diag() + torch.logsumexp(sim_t2v.masked_fill(~hm2, -1e9), dim=0)
 
         ratio = lt.mean() / lv.mean()
         # Both directions should be within 5x of each other (not 100x like old t2v)

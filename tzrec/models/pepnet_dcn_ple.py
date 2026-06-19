@@ -491,15 +491,17 @@ class PEPNetDCNPLE(MultiTaskRank):
                 sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
             )
 
-            # ── t2v direction: fixed τ + HardNegative（无 LogQ）──
+            # ── t2v direction: fixed τ + HardNegative（无 LogQ, 列方向）──
+            #   每列 j：对标题 t[j]，从所有行为 v[0..B-1] 中找正样本 v[j]
             sim_t2v = raw_sim / 0.07
-            _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=-1)
+            _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
             hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
-            hard_mask_t2v[torch.arange(B, device=v.device).unsqueeze(1), topk_t2v] = (
-                True
-            )
+            hard_mask_t2v[
+                topk_t2v,
+                torch.arange(B, device=v.device).unsqueeze(0).expand(K + 1, -1),
+            ] = True
             loss_t2v = -sim_t2v.diag() + torch.logsumexp(
-                sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=-1
+                sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
             )
 
             loss = (loss_v2t + loss_t2v) / 2

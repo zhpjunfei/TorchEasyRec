@@ -71,20 +71,43 @@ loss_v2t ≈ -sim[i,i] + logsumexp(sim_c[hard])
 
 **修复**：`sim_pos = sim_c.diag()`（LogQ 校正后再取对角），收敛后 loss ≈ 0。
 
+#### 问题 4（新发现）：t2v 误用 dim=-1 行方向
+
+评审发现 t2v 使用 `dim=-1`（行方向），和 v2t 完全一样：对每个行为 v[i] 从所有标题中找正样本 `t[i]`。这不是真正的 t2v。
+
+真正的 t2v（列方向 `dim=0`）应该是对每个标题 t[j]，从所有行为 v[0..B-1] 中找匹配的正样本 v[j]。正样本集相同（都是 `(i,i)` 对角），但 **负样本分布不同**：
+
+- 行方向：`v[j≠i]·t[i]`（同一标题，不同行为）
+- 列方向：`v[i]·t[j≠i]`（同一行为，不同标题）
+
+两者互补，对称 InfoNCE 需要两个方向的负样本分布。
+
+**修复**：t2v HardNegative + logsumexp 用 `dim=0`。
+
 #### 问题 3：per-row τ 破坏 sim 对称性
 
 `sim = raw_sim / τ.unsqueeze(1)` 中 τ 按行（seq_len）变化，但 t2v 每次遍历列标题向量——标题的置信度与 seq_len 无关。
 
 **修复**：v2t 用 per-seq_len τ（行为置信度依赖 seq_len），t2v 用固定 τ=0.07（标题向量恒为 Qwen3 128d）。
 
-#### 三个修复统一效果
+**发现：t2v 方向是 dim=0 列方向，不是 dim=-1 行方向**
+
+评审发现第四条——t2v 当前实现也是 `dim=-1`（行方向），和 v2t 完全相同。即对每个行为 v[i] 从所有标题中找正样本，只是温度不同。这等于把相同的对比信号重复了两遍，失去了对称 InfoNCE 中"对每个标题找匹配行为"的收益。
+
+**修复**：t2v HardNegative + logsumexp 改用 `dim=0`（列方向）：
 
 ```
-v2t: sim_v2t = raw_sim / τ(seq_len) - logq    → HardNegative K=150
-t2v: sim_t2v = raw_sim / 0.07                  → HardNegative K=150
-sim_pos_v2t = sim_c.diag()    # ← corrected
+每列 j: 对标题 t[j] → 从所有行为 v[0..B-1] 中挑出匹配的正样本 v[j] 和 hardest 行为负样本
+```
+
+#### 四个修复统一效果
+
+```
+v2t: sim_v2t = raw_sim / τ(seq_len) - logq    → HardNegative dim=-1, K=150
+t2v: sim_t2v = raw_sim / 0.07                  → HardNegative dim=0,  K=150
+sim_pos_v2t = sim_c.diag()    # LogQ 校正
 sim_pos_t2v = sim_t2v.diag()
-loss = (loss_v2t + loss_t2v) / 2    # ← 标准对称 InfoNCE，两方向量级匹配
+loss = (loss_v2t + loss_t2v) / 2    ← 对称 InfoNCE，两方向互补
 ```
 
 **确认：loss 方向修正后不会导致 `contrastive_loss` 回传异常。** 两个方向分开计算 `-sim_pos + logsumexp(hard)`，每个方向各有 ~K+1 项 logsumexp，loss 量级匹配。
@@ -389,13 +412,17 @@ loss_v2t = -sim_c.diag() + torch.logsumexp(
     sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
 )
 
-# t2v: HardNegative on uncorrected sim（t2v 无 LogQ）
+# t2v: HardNegative on uncorrected sim（t2v 无 LogQ, 列方向 dim=0）
+#   每列 j：对标题 t[j]，从所有行为 v[0..B-1] 中找正样本 v[j]
 sim_t2v = raw_sim / 0.07
-_, topk_t2v = torch.topk(sim_t2v, K + 1, dim=-1)
+_, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
 hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
-hard_mask_t2v[torch.arange(B).unsqueeze(1), topk_t2v] = True
+hard_mask_t2v[
+    topk_t2v,
+    torch.arange(B).unsqueeze(0).expand(K + 1, -1),
+] = True
 loss_t2v = -sim_t2v.diag() + torch.logsumexp(
-    sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=-1
+    sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
 )
 ```
 
@@ -541,14 +568,17 @@ def loss(self, predictions, batch):
             sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
         )
 
-        # ── t2v direction: fixed τ + HardNegative（无 LogQ）──
+        # ── t2v direction: fixed τ + HardNegative（无 LogQ, 列方向 dim=0）──
+        #   每列 j：对标题 t[j]，从所有行为 v[0..B-1] 中找正样本 v[j]
         sim_t2v = raw_sim / 0.07
-        _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=-1)
+        _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
         hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
-        hard_mask_t2v[torch.arange(B, device=v.device).unsqueeze(1), topk_t2v] = True
-
+        hard_mask_t2v[
+            topk_t2v,
+            torch.arange(B, device=v.device).unsqueeze(0).expand(K + 1, -1),
+        ] = True
         loss_t2v = -sim_t2v.diag() + torch.logsumexp(
-            sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=-1
+            sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
         )
 
         loss = (loss_v2t + loss_t2v) / 2
