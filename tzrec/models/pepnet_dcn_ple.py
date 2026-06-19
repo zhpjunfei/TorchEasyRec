@@ -487,6 +487,7 @@ class PEPNetDCNPLE(MultiTaskRank):
             _, topk = torch.topk(sim_c, K + 1, dim=-1)
             hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
             hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
+            hard_mask[torch.arange(B, device=v.device), torch.arange(B, device=v.device)] = True
             loss_v2t = -sim_c.diag() + torch.logsumexp(
                 sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
             )
@@ -500,6 +501,7 @@ class PEPNetDCNPLE(MultiTaskRank):
                 topk_t2v,
                 torch.arange(B, device=v.device).unsqueeze(0).expand(K + 1, -1),
             ] = True
+            hard_mask_t2v[torch.arange(B, device=v.device), torch.arange(B, device=v.device)] = True
             loss_t2v = -sim_t2v.diag() + torch.logsumexp(
                 sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
             )
