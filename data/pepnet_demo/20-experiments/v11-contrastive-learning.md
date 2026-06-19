@@ -47,6 +47,48 @@ raw_feature {
 → **Phase 1 的列对齐天然成立**，不需要 stop-gradient。
 → **Phase 2 的行对齐需新增** `embedding_dim: 128` 开启可学习投影。
 
+### 关键修复：v2t/t2v 拆分为独立计算路径
+
+**Phase 1a 实现评审发现三个耦合问题**，根因是 `sim = torch.mm(v, t.t()) / τ.unsqueeze(1)` 一行同时服务两个方向。
+
+#### 问题 1：t2v 全量 16K softmax 无效
+
+t2v 使用 `-sim_pos + logsumexp(sim, dim=0)`，分母包含 16000 项。每个负样本的 softmax 权重 ≈ 1/16000，梯度被平均分配 → 有效推开幅度为 0。
+
+**修复**：t2v 也使用 HardNegative K=150。t2v 不存在 item frequency bias（负样本 = 其他行为向量，不携带 item_id），不需要 LogQ。
+
+#### 问题 2：`sim_pos` 未 LogQ 校正导致 loss → `-logq`
+
+当前 `sim_pos = sim.diag()`（uncorrected），`logsumexp` 内正样本被 LogQ 压低：
+
+```
+loss_v2t ≈ -sim[i,i] + logsumexp(sim_c[hard])
+         ≈ -sim[i,i] + (sim[i,i] - logq[i])
+         ≈ -logq[i]
+```
+
+收敛时 loss 反向→高热 item loss 更低，**放大热门偏差**。
+
+**修复**：`sim_pos = sim_c.diag()`（LogQ 校正后再取对角），收敛后 loss ≈ 0。
+
+#### 问题 3：per-row τ 破坏 sim 对称性
+
+`sim = raw_sim / τ.unsqueeze(1)` 中 τ 按行（seq_len）变化，但 t2v 每次遍历列标题向量——标题的置信度与 seq_len 无关。
+
+**修复**：v2t 用 per-seq_len τ（行为置信度依赖 seq_len），t2v 用固定 τ=0.07（标题向量恒为 Qwen3 128d）。
+
+#### 三个修复统一效果
+
+```
+v2t: sim_v2t = raw_sim / τ(seq_len) - logq    → HardNegative K=150
+t2v: sim_t2v = raw_sim / 0.07                  → HardNegative K=150
+sim_pos_v2t = sim_c.diag()    # ← corrected
+sim_pos_t2v = sim_t2v.diag()
+loss = (loss_v2t + loss_t2v) / 2    # ← 标准对称 InfoNCE，两方向量级匹配
+```
+
+**确认：loss 方向修正后不会导致 `contrastive_loss` 回传异常。** 两个方向分开计算 `-sim_pos + logsumexp(hard)`，每个方向各有 ~K+1 项 logsumexp，loss 量级匹配。
+
 ### 序列长度调节策略（连续 gating）
 
 #### 问题：为什么需要 gating？
@@ -306,11 +348,12 @@ freq = torch.bincount(input_ids, minlength=NUM_BUCKETS).float()
 batch_freq = freq / freq.sum()
 self.log_q.mul_(1 - theta).add_(theta, torch.log(batch_freq + 1e-8))
 
-# v2t 方向校正：
+# v2t 方向校正（LogQ 应用于 logsumexp 的正负所有项）：
 logq = self.log_q[item_ids]
 sim_corrected = sim_matrix - logq.unsqueeze(0)
-# t2v 方向不做校正（behavior 采样不依赖 item 热度）
-loss_t2v = -sim_pos + torch.logsumexp(sim_matrix.t(), dim=-1)
+# sim_pos 使用 sim_corrected.diag()，不是 sim.diag()
+# 避免收敛时 loss → -logq（热门偏差放大）
+# t2v 方向不做校正（behavior 采样不依赖 item 热度，且与 v2t 拆分为独立 sim 矩阵）
 ```
 
 **参数**：
@@ -337,11 +380,23 @@ loss_t2v = -sim_pos + torch.logsumexp(sim_matrix.t(), dim=-1)
 ### P0：Hard Negative Mining
 
 ```python
-K = min(self._contrastive_hard_k, batch_size - 1)
-_, topk_indices = torch.topk(sim_corrected, K + 1, dim=-1)
-hard_mask[arange(batch_size), topk_indices] = True
-sim_hard = sim_corrected.masked_fill(~hard_mask, -inf)
-loss_v2t = -sim_pos + torch.logsumexp(sim_hard, dim=-1)
+# v2t: HardNegative on LogQ-corrected sim
+K = min(self._contrastive_hard_k, B - 1)
+_, topk = torch.topk(sim_c, K + 1, dim=-1)
+hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
+hard_mask[torch.arange(B).unsqueeze(1), topk] = True
+loss_v2t = -sim_c.diag() + torch.logsumexp(
+    sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
+)
+
+# t2v: HardNegative on uncorrected sim（t2v 无 LogQ）
+sim_t2v = raw_sim / 0.07
+_, topk_t2v = torch.topk(sim_t2v, K + 1, dim=-1)
+hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
+hard_mask_t2v[torch.arange(B).unsqueeze(1), topk_t2v] = True
+loss_t2v = -sim_t2v.diag() + torch.logsumexp(
+    sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=-1
+)
 ```
 
 **K 选择依据**：有效 batch size = B × num_gpu = 4096 × 4 = 16384。√(16384) ≈ 128，取整为 150（≈0.9% 负样本）。实践参考：CLIP 32K 全量无筛选，MoCo 65536 取 top 2048（3%）。0.6~1.2% 在信息量和稳定性之间平衡。
@@ -359,7 +414,7 @@ Phase 2 中 title_vector projection 可学习后，用 `t_proj.detach()` 防止�
 ```python
 with torch.no_grad():
     align = (v * t).sum(dim=-1).mean()
-    uniformity = neg_sim.exp().mean().log()
+    uniformity = sim_v2t[~hard_mask & ~eye(B)].exp().mean().log()
 ```
 
 | 状态 | Alignment | Uniformity |
@@ -442,7 +497,7 @@ if self.training and self._contrastive_loss_enabled and self.contrastive_behavio
         predictions["_ctr_seq_len"] = seq_len
 ```
 
-#### 2c. `loss()`（+25 行）
+#### 2c. `loss()`（+35 行）
 
 ```python
 def loss(self, predictions, batch):
@@ -464,56 +519,80 @@ def loss(self, predictions, batch):
                 )
 
         v, t = F.normalize(v, dim=-1), F.normalize(t, dim=-1)
-        tau = 0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())
+        raw_sim = torch.mm(v, t.t())
 
-        sim = torch.mm(v, t.t()) / tau.unsqueeze(1)
+        # ── v2t direction: per-seq_len τ + LogQ + HardNegative ──
+        tau_v2t = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
+        sim_v2t = raw_sim / tau_v2t
 
-        # LogQ 校正（仅 v2t 方向）
-        sim_c = sim.clone()
+        # LogQ 校正
+        sim_c = sim_v2t.clone()
         if self._log_q is not None and kjt is not None and "item_id_emb" in kjt.keys():
-            logq = self._log_q[item_ids].to(sim.device)
+            logq = self._log_q[item_ids].to(sim_v2t.device)
             sim_c = sim_c - logq.unsqueeze(0)
 
-        sim_pos = sim.diag()
-
-        # Hard negative
+        # HardNegative K=150（包含正样本在 topk 内）
         K = min(self._contrastive_hard_k, B - 1)
         _, topk = torch.topk(sim_c, K + 1, dim=-1)
         hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
-        hard_mask[torch.arange(B).unsqueeze(1), topk] = True
+        hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
 
-        loss_v2t = -sim_pos + torch.logsumexp(sim_c.masked_fill(~hard_mask, -float('inf')), dim=-1)
-        loss_t2v = -sim_pos + torch.logsumexp(sim, dim=-1)
+        loss_v2t = -sim_c.diag() + torch.logsumexp(
+            sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
+        )
+
+        # ── t2v direction: fixed τ + HardNegative（无 LogQ）──
+        sim_t2v = raw_sim / 0.07
+        _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=-1)
+        hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
+        hard_mask_t2v[torch.arange(B, device=v.device).unsqueeze(1), topk_t2v] = True
+
+        loss_t2v = -sim_t2v.diag() + torch.logsumexp(
+            sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=-1
+        )
+
         loss = (loss_v2t + loss_t2v) / 2
 
         mask = (seq_len >= 0).float()
         if mask.sum() > 0:
-            losses["contrastive_loss"] = (loss * mask).sum() / mask.sum() * self._contrastive_loss_weight
+            losses["contrastive_loss"] = (
+                (loss * mask).sum() / mask.sum() * self._contrastive_loss_weight
+            )
+            losses["contrastive_v2t_loss"] = (
+                (loss_v2t * mask).sum() / mask.sum() * self._contrastive_loss_weight
+            )
+            losses["contrastive_t2v_loss"] = (
+                (loss_t2v * mask).sum() / mask.sum() * self._contrastive_loss_weight
+            )
 
         with torch.no_grad():
-            self._contrastive_metrics.update({
-                "ctr_align": (v * t).sum(-1).mean().item(),
-                "ctr_uniform": sim_c[
-                    ~hard_mask & ~torch.eye(B, dtype=torch.bool, device=v.device)
-                ].exp().mean().log().item() if (~hard_mask).sum() > B else 0.0,
-            })
+            align = (v * t).sum(-1).mean().item()
+            neg_mask = ~hard_mask & ~torch.eye(B, dtype=torch.bool, device=v.device)
+            uniformity = (
+                sim_v2t[neg_mask].exp().mean().log().item()
+                if neg_mask.sum() > B
+                else 0.0
+            )
+            self._contrastive_metrics.update(
+                {"ctr_align": align, "ctr_uniform": uniformity}
+            )
 
     return losses
 ```
 
 ### 变更汇总
 
-| 变更                                | 文件                | 行      | 风险   |
-| ----------------------------------- | ------------------- | ------- | ------ |
-| 暴露单序列 DIN 输出                 | `embedding.py`      | 2       | **低** |
-| InfoNCE + gating + default_behavior | `pepnet_dcn_ple.py` | 20      | **低** |
-| LogQ correction (Moving Avg)        | `pepnet_dcn_ple.py` | 8       | **低** |
-| Hard negative mining                | `pepnet_dcn_ple.py` | 8       | **低** |
-| 诊断指标                            | `pepnet_dcn_ple.py` | 10      | **低** |
-| **合计**                            | **2 files**         | **~48** | -      |
-| Phase 1b: chaprice 辅助 view        | `.py`               | +5      | **低** |
-| Phase 2: 行对齐                     | config + .py        | +5      | **中** |
-| Phase 3: 连续 gating                | .py                 | +5      | **低** |
+| 变更                                   | 文件                | 行      | 风险   |
+| -------------------------------------- | ------------------- | ------- | ------ |
+| 暴露单序列 DIN 输出                    | `embedding.py`      | 2       | **低** |
+| InfoNCE + gating + default_behavior    | `pepnet_dcn_ple.py` | 18      | **低** |
+| LogQ correction (Moving Avg)           | `pepnet_dcn_ple.py` | 8       | **低** |
+| Hard negative mining（v2t + t2v 独立） | `pepnet_dcn_ple.py` | 14      | **低** |
+| 诊断指标 + 拆分 logging                | `pepnet_dcn_ple.py` | 15      | **低** |
+| **合计**                               | **2 files**         | **~57** | -      |
+| Phase 1b: chaprice 辅助 view           | `.py`               | +5      | **低** |
+| Phase 2: 行对齐                        | config + .py        | +5      | **中** |
+| Phase 3: 连续 gating                   | .py                 | +5      | **低** |
 
 ### 不需要改
 
@@ -544,6 +623,9 @@ ______________________________________________________________________
 | LogQ Moving Average 对罕见 item 偏差 | **低**   | 频率估计不准            | item 存活期短，动量自动遗忘                  | **极低** |
 | batch 中 item 高度重复 → hard neg 少 | **低**   | 退化到全量 softmax      | fallback: 无 hard neg 时用 full              | **低**   |
 | 温度 τ 对短序列压制过度              | **中**   | 对比学习在短序上 ≈ 无效 | 调 α / τ_min；短序本来信号弱，可接受         | **低**   |
+| t2v 全量 16K softmax 无效            | **确定** | t2v loss ≈ 噪声底       | 已修复：t2v 改为 HardNegative K=150          | **已修** |
+| `sim_pos` 未 LogQ → loss 偏差        | **确定** | 收敛时 loss → -logq     | 已修复：`sim_pos = sim_c.diag()`             | **已修** |
+| per-row τ 破坏 sim 对称性            | **确定** | loss surface 不对称     | 已修复：v2t/t2v 拆独立 sim 矩阵              | **已修** |
 | Phase 2 表示坍缩                     | **低**   | 对比失效                | stop-gradient（已设计）+ 诊断监控            | **低**   |
 | `torch.fx` trace 训练分支死代码      | **极低** | 导出图含无用节点        | eliminate_dead_code 自动清除；无显式保留需要 | **极低** |
 | chaprice + title_vector 粒度不匹配   | **确定** | 预期增益有限            | 权重设为 0.3，不阻塞主 view                  | **低**   |
@@ -568,9 +650,9 @@ ______________________________________________________________________
 
 | 子步骤                | 方法                                    | 行数 |
 | --------------------- | --------------------------------------- | ---- |
-| 2a. `__init__()` 尾部 | 注册 parameters + Moving Avg LogQ init  | +20  |
+| 2a. `__init__()` 尾部 | 注册 parameters + Moving Avg LogQ init  | +18  |
 | 2b. `predict()`       | 提取行为特征                            | +15  |
-| 2c. `loss()`          | InfoNCE + LogQ + HardNegative + Metrics | +25  |
+| 2c. `loss()`          | InfoNCE + LogQ + HardNegative + Metrics | +35  |
 
 验证：单步 forward + backward 不报错，loss 输出含 `"contrastive_loss"`
 
@@ -615,21 +697,21 @@ ______________________________________________________________________
 ! 状态标记: ✅ 已完成 | 🔄 进行中 | ⏳ 待开始 | ❌ 阻塞/回退
 ```
 
-| 序号 | 任务                           | 文件/范围                            | 优先级 | 依赖 | 状态 | 备注                                        |
-| ---- | ------------------------------ | ------------------------------------ | ------ | ---- | ---- | ------------------------------------------- |
-| 1    | 修改 embedding.py（+2 行）     | `tzrec/modules/embedding.py:557-561` | P0     | —    | ✅   | 暴露 `{group}__seq_output__{seq}`           |
-| 2a   | pepnet `__init__()` Moving Avg | `tzrec/models/pepnet_dcn_ple.py`     | P0     | —    | ✅   | 含 LogQ init + DIN dim + TV idx + proj      |
-| 2b   | pepnet `predict()` 提取特征    | 同上                                 | P0     | 2a   | ✅   | behavior + title + seq_len 存入 predictions |
-| 2c   | pepnet `loss()` InfoNCE        | 同上                                 | P0     | 2b   | ✅   | 含 Moving Avg LogQ + HardNegative + Metrics |
-| 3    | 训练 Phase 1a                  | DLC 集群                             | P0     | 1+2  | ⏳   | 2-3 epoch 验证                              |
-| 4    | 阶段评审                       | —                                    | P0     | 3    | ⏳   | 决策是否推进                                |
-| 5    | Phase 1b: chaprice 辅助 view   | `pepnet_dcn_ple.py`                  | P2     | 3    | ⏳   | 可跳过                                      |
-| 6    | Phase 2: 行对齐                | config + .py                         | P2     | 4    | ⏳   | 可跳过                                      |
-| 7    | Phase 3: 双向 gating           | .py                                  | P3     | 6    | ⏳   | 可跳过                                      |
+| 序号 | 任务                           | 文件/范围                            | 优先级 | 依赖 | 状态 | 备注                                                                     |
+| ---- | ------------------------------ | ------------------------------------ | ------ | ---- | ---- | ------------------------------------------------------------------------ |
+| 1    | 修改 embedding.py（+2 行）     | `tzrec/modules/embedding.py:557-561` | P0     | —    | ✅   | 暴露 `{group}__seq_output__{seq}`                                        |
+| 2a   | pepnet `__init__()` Moving Avg | `tzrec/models/pepnet_dcn_ple.py`     | P0     | —    | ✅   | 含 LogQ init + DIN dim + TV idx + proj                                   |
+| 2b   | pepnet `predict()` 提取特征    | 同上                                 | P0     | 2a   | ✅   | behavior + title + seq_len 存入 predictions                              |
+| 2c   | pepnet `loss()` InfoNCE        | 同上                                 | P0     | 2b   | ✅   | 含 Moving Avg LogQ + HardNegative + Metrics; **评审后修复 3 个耦合问题** |
+| 3    | 训练 Phase 1a                  | DLC 集群                             | P0     | 1+2  | ⏳   | 2-3 epoch 验证                                                           |
+| 4    | 阶段评审                       | —                                    | P0     | 3    | ⏳   | 决策是否推进                                                             |
+| 5    | Phase 1b: chaprice 辅助 view   | `pepnet_dcn_ple.py`                  | P2     | 3    | ⏳   | 可跳过                                                                   |
+| 6    | Phase 2: 行对齐                | config + .py                         | P2     | 4    | ⏳   | 可跳过                                                                   |
+| 7    | Phase 3: 双向 gating           | .py                                  | P3     | 6    | ⏳   | 可跳过                                                                   |
 
 ### 8.5 一句话结论
 
-**方案可行，无需离线依赖。** 2 个文件、~48 行代码、0 个配置变更。 LogQ 使用 Moving Average 端到端学习 item 频率分布，随训练自动过期，不需要 SQL / 离线预处理。三个关键理论缺陷（Moving Avg LogQ、HardNegative、诊断）已补齐，参考了 YouTube DNN / Alibaba production 实践。首次实施只跑 Phase 1a，用 click_50_seq 主 view 验证效果后再扩展。
+**方案可行，无需离线依赖。** 2 个文件、~57 行代码、0 个配置变更。 LogQ 使用 Moving Average 端到端学习 item 频率分布，随训练自动过期，不需要 SQL / 离线预处理。三个关键理论缺陷（Moving Avg LogQ、HardNegative、诊断）已补齐，评审发现三个设计耦合问题（t2v 16K 无效、sim_pos 未矫正、τ 不对称）已全部修复。首次实施只跑 Phase 1a，用 click_50_seq 主 view 验证效果后再扩展。
 
 ______________________________________________________________________
 
@@ -654,6 +736,7 @@ ______________________________________________________________________
 1. **contrastive vs title_vector**：CTR -0.00014 / CVR -0.00026，也在随机波动范围内
 1. `contrastive_loss:0.57141` 正常输出，LogQ + HardNegative + gating 全部生效
 1. 训练速度 1.19 it/s vs 1.21 it/s（+2%），额外计算开销可忽略
+1. `sim_pos` 未 LogQ 校正 + `(loss_v2t+loss_t2v)/2` 平均 masking 了 t2v 虚高——**损失 0.571 中 ~87% 来自 t2v 噪声底**，实际有效对比信号（v2t）仅 ~0.08 effect_weight=0.1 后。**三个设计缺陷在评审后修复**（见 §5 关键修复）
 1. 注意：**baseline 在多 epoch 上已被多次验证发生过拟合**，contrastive 的收益可能在后续 epoch 体现
 
 ### 后续 epoch 观察

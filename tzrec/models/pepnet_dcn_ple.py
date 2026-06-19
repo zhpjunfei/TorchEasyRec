@@ -469,26 +469,39 @@ class PEPNetDCNPLE(MultiTaskRank):
 
             v = F.normalize(v, dim=-1)
             t = F.normalize(t, dim=-1)
-            tau = 0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())
-            sim = torch.mm(v, t.t()) / tau.unsqueeze(1)
-            sim_c = sim.clone()
+            raw_sim = torch.mm(v, t.t())
+            K = min(self._contrastive_hard_k, B - 1)
+
+            # ── v2t direction: per-seq_len τ + LogQ + HardNegative ──
+            tau_v2t = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
+            sim_v2t = raw_sim / tau_v2t
+            sim_c = sim_v2t.clone()
             if (
                 self._log_q is not None
                 and kjt is not None
                 and "item_id_emb" in kjt.keys()
             ):
-                logq = self._log_q[item_ids].to(sim.device)
+                logq = self._log_q[item_ids].to(sim_v2t.device)
                 sim_c = sim_c - logq.unsqueeze(0)
 
-            sim_pos = sim.diag()
-            K = min(self._contrastive_hard_k, B - 1)
             _, topk = torch.topk(sim_c, K + 1, dim=-1)
             hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
             hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
-            loss_v2t = -sim_pos + torch.logsumexp(
+            loss_v2t = -sim_c.diag() + torch.logsumexp(
                 sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
             )
-            loss_t2v = -sim_pos + torch.logsumexp(sim, dim=0)
+
+            # ── t2v direction: fixed τ + HardNegative（无 LogQ）──
+            sim_t2v = raw_sim / 0.07
+            _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=-1)
+            hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
+            hard_mask_t2v[torch.arange(B, device=v.device).unsqueeze(1), topk_t2v] = (
+                True
+            )
+            loss_t2v = -sim_t2v.diag() + torch.logsumexp(
+                sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=-1
+            )
+
             loss = (loss_v2t + loss_t2v) / 2
 
             mask = (seq_len >= 0).float()
@@ -496,12 +509,18 @@ class PEPNetDCNPLE(MultiTaskRank):
                 losses["contrastive_loss"] = (
                     (loss * mask).sum() / mask.sum() * self._contrastive_loss_weight
                 )
+                losses["contrastive_v2t_loss"] = (
+                    (loss_v2t * mask).sum() / mask.sum() * self._contrastive_loss_weight
+                )
+                losses["contrastive_t2v_loss"] = (
+                    (loss_t2v * mask).sum() / mask.sum() * self._contrastive_loss_weight
+                )
 
             with torch.no_grad():
                 align = (v * t).sum(-1).mean().item()
                 neg_mask = ~hard_mask & ~torch.eye(B, dtype=torch.bool, device=v.device)
                 uniformity = (
-                    sim_c[neg_mask].exp().mean().log().item()
+                    sim_v2t[neg_mask].exp().mean().log().item()
                     if neg_mask.sum() > B
                     else 0.0
                 )
