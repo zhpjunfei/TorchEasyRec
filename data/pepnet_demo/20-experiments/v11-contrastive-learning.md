@@ -639,23 +639,32 @@ ______________________________________________________________________
 
 各 v11 变体训练 7800 step 后指标：
 
-| 变体             | config 差异                                    | CTR AUC     | CVR AUC     | 相对 baseline              |
-| ---------------- | ---------------------------------------------- | ----------- | ----------- | -------------------------- |
-| **baseline**     | 原始 PEPNetDCNPLE                              | 0.71572     | 0.75489     | —                          |
-| **title_vector** | +title_vector feature, **无 contrastive loss** | **0.71574** | **0.75465** | CTR +0.00002, CVR -0.00024 |
-| tmax_6700        | +t_max=6700                                    | 0.71590     | 0.75496     | CTR +0.00018, CVR +0.00007 |
-| f_req_page_dim4  | +req_page dim=4                                | 0.71538     | 0.75440     | CTR -0.00034, CVR -0.00049 |
-| silu             | ReLU → SiLU                                    | 0.71538     | 0.75450     | CTR -0.00034, CVR -0.00039 |
+| 变体             | config 差异                                       | CTR AUC     | CVR AUC     | 相对 baseline              |
+| ---------------- | ------------------------------------------------- | ----------- | ----------- | -------------------------- |
+| **baseline**     | 原始 PEPNetDCNPLE                                 | 0.71572     | 0.75489     | —                          |
+| **title_vector** | +title_vector feature, **无 contrastive loss**    | **0.71574** | **0.75465** | CTR +0.00002, CVR -0.00024 |
+| tmax_6700        | +t_max=6700                                       | 0.71590     | 0.75496     | CTR +0.00018, CVR +0.00007 |
+| f_req_page_dim4  | +req_page dim=4                                   | 0.71538     | 0.75440     | CTR -0.00034, CVR -0.00049 |
+| silu             | ReLU → SiLU                                       | 0.71538     | 0.75450     | CTR -0.00034, CVR -0.00039 |
+| **contrastive**  | title_vector + **contrastive_loss_enabled: true** | **0.71560** | **0.75439** | CTR -0.00014, CVR -0.00026 |
 
-**关键结论**：
+**Epoch 0 关键结论**：
 
 1. **title_vector 本身对 AUC 无影响**（差异 < 0.0003，在随机波动范围内）→ 干净的对比基线
-1. **contrastive 训练应该对比 title_vector 而非 baseline**，排除 title_vector feature 本身的干扰
-1. 其他变体（tmax、f_req_page_dim4、silu）也无显著差异，v11 配置面基本收敛
+1. **contrastive vs title_vector**：CTR -0.00014 / CVR -0.00026，也在随机波动范围内
+1. `contrastive_loss:0.57141` 正常输出，LogQ + HardNegative + gating 全部生效
+1. 训练速度 1.19 it/s vs 1.21 it/s（+2%），额外计算开销可忽略
+1. 注意：**baseline 在多 epoch 上已被多次验证发生过拟合**，contrastive 的收益可能在后续 epoch 体现
 
-### 待跑实验
+### 后续 epoch 观察
 
-| 实验                 | config                                                 | 预期                                          |
-| -------------------- | ------------------------------------------------------ | --------------------------------------------- |
-| Phase 1a contrastive | `home_flow_2604_v11_contrastive.config`                | train log 出现 contrastive_loss；CTR AUC 不跌 |
-|                      | （基于 title_vector + contrastive_loss_enabled: true） | alignment 0.2~0.8；uniformity -1~-5           |
+| Epoch | baseline CTR AUC | contrastive CTR AUC | baseline CVR AUC | contrastive CVR AUC |
+| ----- | ---------------- | ------------------- | ---------------- | ------------------- |
+| 0     | 0.71572          | 0.71560             | 0.75489          | 0.75439             |
+| 1     | ⏳               | ⏳                  | ⏳               | ⏳                  |
+| 2     | ⏳               | ⏳                  | ⏳               | ⏳                  |
+
+关注点：
+
+- contrastive AUC 衰减斜率是否 < baseline（正则化效果）
+- alignment / uniformity 是否收敛到合理区间
