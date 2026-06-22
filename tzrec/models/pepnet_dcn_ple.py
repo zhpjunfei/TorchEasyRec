@@ -258,12 +258,19 @@ class PEPNetDCNPLE(MultiTaskRank):
 
         self._cvr_add_ctr_logits = self._model_config.cvr_add_ctr_logits
 
-        # --- Contrastive Learning (Phase 1a: column alignment) ---
+        # --- Contrastive Learning ---
         self._contrastive_loss_weight = 0.1
         self._contrastive_loss_enabled = self._model_config.contrastive_loss_enabled
-        self._contrastive_hard_k = 150
         self._contrastive_logq_theta = 0.01
         self._contrastive_metrics = {}
+
+        # alignment mode: "column" (Phase 1a), "bidirectional" (Phase 2),
+        # "row" (reserved)
+        self._contrastive_alignment_mode = (
+            self._model_config.contrastive_alignment_mode
+            if self._contrastive_loss_enabled
+            else "column"
+        )
 
         self._contrastive_din_output_dim = None
         group_seq_encoders = getattr(
@@ -302,6 +309,18 @@ class PEPNetDCNPLE(MultiTaskRank):
             )
         else:
             self.register_buffer("_log_q", None)
+
+        # --- Phase 2: residual title adapter (only in bidirectional/row modes) ---
+        if self._contrastive_alignment_mode in ("bidirectional", "row"):
+            self.contrastive_title_adapter = nn.Sequential(
+                nn.Linear(128, 64),
+                nn.ReLU(),
+                nn.Linear(64, 128),
+            )
+            nn.init.zeros_(self.contrastive_title_adapter[2].weight)
+            nn.init.zeros_(self.contrastive_title_adapter[2].bias)
+        else:
+            self.contrastive_title_adapter = None
 
     def _extract_bias(
         self, feature_tensors: List[torch.Tensor]
@@ -426,7 +445,7 @@ class PEPNetDCNPLE(MultiTaskRank):
             behavior_emb = grouped_features.get("all__seq_output__click_50_seq")
             if behavior_emb is not None and self._title_vector_idx is not None:
                 v = self.contrastive_behavior_proj(behavior_emb)
-                t = grouped_features[self._main_group_name][
+                t_raw = grouped_features[self._main_group_name][
                     :, self._title_vector_idx[0] : self._title_vector_idx[1]
                 ]
                 seq_len = grouped_features["click_50_seq.sequence_length"]
@@ -435,6 +454,10 @@ class PEPNetDCNPLE(MultiTaskRank):
                     v,
                     self.default_behavior.unsqueeze(0).expand_as(v),
                 )
+                if self._contrastive_alignment_mode in ("bidirectional", "row"):
+                    t = t_raw + self.contrastive_title_adapter(t_raw)
+                else:
+                    t = t_raw
                 predictions["_ctr_behavior"] = v
                 predictions["_ctr_title"] = t
                 predictions["_ctr_seq_len"] = seq_len
@@ -469,67 +492,143 @@ class PEPNetDCNPLE(MultiTaskRank):
 
             v = F.normalize(v, dim=-1)
             t = F.normalize(t, dim=-1)
-            raw_sim = torch.mm(v, t.t())
-            K = min(self._contrastive_hard_k, B - 1)
 
-            # ── v2t direction: per-seq_len τ + LogQ + HardNegative ──
-            tau_v2t = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
-            sim_v2t = raw_sim / tau_v2t
-            sim_c = sim_v2t.clone()
-            if (
-                self._log_q is not None
-                and kjt is not None
-                and "item_id_emb" in kjt.keys()
-            ):
-                logq = self._log_q[item_ids].to(sim_v2t.device)
-                sim_c = sim_c - logq.unsqueeze(0)
+            # ── Mode-specific contrastive loss ──
+            if self._contrastive_alignment_mode == "column":
+                # Phase 1a: single-side column alignment (existing behavior)
+                K = min(150, B - 1)
+                raw_sim = torch.mm(v, t.t())
 
-            _, topk = torch.topk(sim_c, K + 1, dim=-1)
-            hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
-            hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
-            hard_mask[torch.arange(B, device=v.device), torch.arange(B, device=v.device)] = True
-            loss_v2t = -sim_c.diag() + torch.logsumexp(
-                sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
-            )
+                # v2t: per-seq_len τ + LogQ + HardNegative
+                tau = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
+                sim_v2t = raw_sim / tau
+                sim_c = sim_v2t.clone()
+                if (
+                    self._log_q is not None
+                    and kjt is not None
+                    and "item_id_emb" in kjt.keys()
+                ):
+                    logq = self._log_q[item_ids].to(sim_v2t.device)
+                    sim_c = sim_c - logq.unsqueeze(0)
 
-            # ── t2v direction: fixed τ + HardNegative（无 LogQ, 列方向）──
-            #   每列 j：对标题 t[j]，从所有行为 v[0..B-1] 中找正样本 v[j]
-            sim_t2v = raw_sim / 0.07
-            _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
-            hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
-            hard_mask_t2v[
-                topk_t2v,
-                torch.arange(B, device=v.device).unsqueeze(0).expand(K + 1, -1),
-            ] = True
-            hard_mask_t2v[torch.arange(B, device=v.device), torch.arange(B, device=v.device)] = True
-            loss_t2v = -sim_t2v.diag() + torch.logsumexp(
-                sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
-            )
+                _, topk = torch.topk(sim_c, K + 1, dim=-1)
+                hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
+                hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
+                hard_mask[
+                    torch.arange(B, device=v.device), torch.arange(B, device=v.device)
+                ] = True
+                loss_v2t = -sim_c.diag() + torch.logsumexp(
+                    sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
+                )
 
-            loss = (loss_v2t + loss_t2v) / 2
+                # t2v: fixed τ + HardNegative (column direction, no LogQ)
+                sim_t2v = raw_sim / 0.07
+                _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
+                hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
+                hard_mask_t2v[
+                    topk_t2v,
+                    torch.arange(B, device=v.device).unsqueeze(0).expand(K + 1, -1),
+                ] = True
+                hard_mask_t2v[
+                    torch.arange(B, device=v.device), torch.arange(B, device=v.device)
+                ] = True
+                loss_t2v = -sim_t2v.diag() + torch.logsumexp(
+                    sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
+                )
+
+                loss_contrast = (loss_v2t + loss_t2v) / 2
+
+                with torch.no_grad():
+                    align = (v * t).sum(-1).mean().item()
+                    neg_mask = ~hard_mask & ~torch.eye(
+                        B, dtype=torch.bool, device=v.device
+                    )
+                    uniformity = (
+                        sim_v2t[neg_mask].exp().mean().log().item()
+                        if neg_mask.sum() > B
+                        else 0.0
+                    )
+                    self._contrastive_metrics.update(
+                        {"ctr_align": align, "ctr_uniform": uniformity}
+                    )
+
+            elif self._contrastive_alignment_mode == "bidirectional":
+                # Phase 2: bidirectional row+column alignment
+                # (residual adapter + detach)
+                K = min(50, B - 1)
+                tau_v2t = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
+                tau_t2v = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(0)
+
+                # v2t: title anchors, behavior queries → only behavior_proj gets grad
+                sim_v2t = torch.mm(v, t.detach().t()) / tau_v2t
+                sim_c = sim_v2t.clone()
+                if (
+                    self._log_q is not None
+                    and kjt is not None
+                    and "item_id_emb" in kjt.keys()
+                ):
+                    logq = self._log_q[item_ids].to(sim_v2t.device)
+                    sim_c = sim_c - logq.unsqueeze(0)
+
+                _, topk = torch.topk(sim_c, K + 1, dim=-1)
+                hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
+                hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
+                hard_mask[
+                    torch.arange(B, device=v.device), torch.arange(B, device=v.device)
+                ] = True
+                loss_v2t = -sim_c.diag() + torch.logsumexp(
+                    sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
+                )
+
+                # t2v: behavior anchors, title queries → only title_adapter gets grad
+                sim_t2v = torch.mm(v.detach(), t.t()) / tau_t2v
+                _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
+                hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
+                hard_mask_t2v[
+                    topk_t2v,
+                    torch.arange(B, device=v.device).unsqueeze(0).expand(K + 1, -1),
+                ] = True
+                hard_mask_t2v[
+                    torch.arange(B, device=v.device), torch.arange(B, device=v.device)
+                ] = True
+                loss_t2v = -sim_t2v.diag() + torch.logsumexp(
+                    sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
+                )
+
+                loss_contrast = (loss_v2t + loss_t2v) / 2
+
+                with torch.no_grad():
+                    align = (v * t).sum(-1).mean().item()
+                    neg_mask = ~hard_mask & ~torch.eye(
+                        B, dtype=torch.bool, device=v.device
+                    )
+                    uniformity = (
+                        sim_v2t[neg_mask].exp().mean().log().item()
+                        if neg_mask.sum() > B
+                        else 0.0
+                    )
+                    self._contrastive_metrics.update(
+                        {"ctr_align": align, "ctr_uniform": uniformity}
+                    )
+
+            else:
+                # "row" mode: reserved stub
+                loss_contrast = v.new_zeros(B)
+                loss_v2t = v.new_zeros(B)
+                loss_t2v = v.new_zeros(B)
 
             mask = (seq_len >= 0).float()
             if mask.sum() > 0:
                 losses["contrastive_loss"] = (
-                    (loss * mask).sum() / mask.sum() * self._contrastive_loss_weight
+                    (loss_contrast * mask).sum()
+                    / mask.sum()
+                    * self._contrastive_loss_weight
                 )
                 losses["contrastive_v2t_loss"] = (
                     (loss_v2t * mask).sum() / mask.sum() * self._contrastive_loss_weight
                 )
                 losses["contrastive_t2v_loss"] = (
                     (loss_t2v * mask).sum() / mask.sum() * self._contrastive_loss_weight
-                )
-
-            with torch.no_grad():
-                align = (v * t).sum(-1).mean().item()
-                neg_mask = ~hard_mask & ~torch.eye(B, dtype=torch.bool, device=v.device)
-                uniformity = (
-                    sim_v2t[neg_mask].exp().mean().log().item()
-                    if neg_mask.sum() > B
-                    else 0.0
-                )
-                self._contrastive_metrics.update(
-                    {"ctr_align": align, "ctr_uniform": uniformity}
                 )
 
         return losses

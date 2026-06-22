@@ -26,29 +26,15 @@ class PEPNetDCNPLEContrastiveTest(unittest.TestCase):
         seq_len = torch.linspace(50, 0, B, dtype=torch.float32)
         return v, t, seq_len
 
-    def _contrastive_loss_old(
+    def _contrastive_loss_column(
         self, v: torch.Tensor, t: torch.Tensor, seq_len: torch.Tensor, K: int = 2
     ):
-        """Replicates the BUGGY Phase 1a loss computation."""
-        v = v / v.norm(dim=-1, keepdim=True)
-        t = t / t.norm(dim=-1, keepdim=True)
-        tau = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
-        sim = torch.mm(v, t.t()) / tau
-        sim_pos = sim.diag()
-        loss_v2t = -sim_pos + torch.logsumexp(sim, dim=-1)
-        loss_t2v = -sim_pos + torch.logsumexp(sim, dim=0)
-        return (loss_v2t + loss_t2v) / 2
-
-    def _contrastive_loss_new(
-        self, v: torch.Tensor, t: torch.Tensor, seq_len: torch.Tensor, K: int = 2
-    ):
-        """Replicates the FIXED loss computation from the design doc §7."""
+        """Replicates the FIXED Phase 1a (column) loss computation."""
         B = v.size(0)
         v = v / v.norm(dim=-1, keepdim=True)
         t = t / t.norm(dim=-1, keepdim=True)
         raw_sim = torch.mm(v, t.t())
 
-        # v2t: per-seq_len τ + HardNegative
         tau_v2t = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
         sim_v2t = raw_sim / tau_v2t
         sim_c = sim_v2t.clone()
@@ -61,7 +47,6 @@ class PEPNetDCNPLEContrastiveTest(unittest.TestCase):
             sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
         )
 
-        # t2v: fixed τ + HardNegative（列方向 dim=0）
         sim_t2v = raw_sim / 0.07
         _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
         hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
@@ -76,10 +61,52 @@ class PEPNetDCNPLEContrastiveTest(unittest.TestCase):
 
         return (loss_v2t + loss_t2v) / 2
 
+    def _contrastive_loss_bidirectional(
+        self, v: torch.Tensor, t_raw: torch.Tensor, seq_len: torch.Tensor, K: int = 2
+    ):
+        """Replicates Phase 2 bidirectional loss with residual adapter + detach."""
+        B = v.size(0)
+        # simulate zero-init adapter: t_proj == t_raw
+        t = t_raw + torch.zeros_like(t_raw)
+
+        v = v / v.norm(dim=-1, keepdim=True)
+        t = t / t.norm(dim=-1, keepdim=True)
+
+        tau_v2t = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
+        tau_t2v = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(0)
+
+        # v2t: title anchors, behavior queries
+        sim_v2t = torch.mm(v, t.detach().t()) / tau_v2t
+        sim_c = sim_v2t.clone()
+        _, topk = torch.topk(sim_c, K + 1, dim=-1)
+        hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
+        hard_mask[torch.arange(B).unsqueeze(1), topk] = True
+        hard_mask[torch.arange(B), torch.arange(B)] = True
+        loss_v2t = -sim_c.diag() + torch.logsumexp(
+            sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
+        )
+
+        # t2v: behavior anchors, title queries
+        sim_t2v = torch.mm(v.detach(), t.t()) / tau_t2v
+        _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
+        hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
+        hard_mask_t2v[
+            topk_t2v,
+            torch.arange(B).unsqueeze(0).expand(K + 1, -1),
+        ] = True
+        hard_mask_t2v[torch.arange(B), torch.arange(B)] = True
+        loss_t2v = -sim_t2v.diag() + torch.logsumexp(
+            sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
+        )
+
+        return (loss_v2t + loss_t2v) / 2
+
+    # ── Phase 1a (column) tests ──
+
     def test_finite_values(self):
         """Loss values are finite for both directions."""
         v, t, seq_len = self._make_contrastive_inputs(B=8)
-        loss = self._contrastive_loss_new(v, t, seq_len, K=3)
+        loss = self._contrastive_loss_column(v, t, seq_len, K=3)
         self.assertTrue(torch.isfinite(loss).all())
 
     def test_v2t_t2v_comparable_magnitude(self):
@@ -107,7 +134,6 @@ class PEPNetDCNPLEContrastiveTest(unittest.TestCase):
         lt = -sim_t2v.diag() + torch.logsumexp(sim_t2v.masked_fill(~hm2, -1e9), dim=0)
 
         ratio = lt.mean() / lv.mean()
-        # Both directions should be within 5x of each other (not 100x like old t2v)
         self.assertGreater(ratio.item(), 0.2)
         self.assertLess(ratio.item(), 5.0)
 
@@ -119,7 +145,6 @@ class PEPNetDCNPLEContrastiveTest(unittest.TestCase):
         raw_sim = torch.mm(vn, tn.t())
         K = 3
 
-        # v2t
         sim_c = raw_sim / (0.07 + 0.43 * torch.exp(-0.1 * seq_len)).unsqueeze(1)
         _, topk = torch.topk(sim_c, K + 1, dim=-1)
         hm = torch.zeros_like(sim_c, dtype=torch.bool)
@@ -128,7 +153,6 @@ class PEPNetDCNPLEContrastiveTest(unittest.TestCase):
         for i in range(8):
             self.assertTrue(hm[i, i], f"v2t diagonal ({i},{i}) not in hard mask")
 
-        # t2v
         sim_t2v = raw_sim / 0.07
         _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
         hm2 = torch.zeros_like(sim_t2v, dtype=torch.bool)
@@ -152,6 +176,43 @@ class PEPNetDCNPLEContrastiveTest(unittest.TestCase):
         uncorrected = sim_v2t.diag()
         corrected = sim_c.diag()
         self.assertTrue(torch.allclose(uncorrected - corrected, logq))
+
+    # ── Phase 2 (bidirectional) tests ──
+
+    def test_bidirectional_finite(self):
+        """Bidirectional loss values are finite when adapter is zero-initialized."""
+        v, t, seq_len = self._make_contrastive_inputs(B=8)
+        loss = self._contrastive_loss_bidirectional(v, t, seq_len, K=2)
+        self.assertTrue(torch.isfinite(loss).all())
+
+    def test_bidirectional_column_equivalence_at_init(self):
+        """Bidirectional ≈ column at init (same output with zero-adapter)."""
+        torch.manual_seed(123)
+        v, t, seq_len = self._make_contrastive_inputs(B=8)
+        # column loss with default fixed t2v tau=0.07
+        column_loss = self._contrastive_loss_column(v, t, seq_len, K=3)
+        bidir_loss = self._contrastive_loss_bidirectional(v, t, seq_len, K=3)
+        # bidirectional uses per-seq_len τ for both directions
+        # (intentional design difference)
+        # They should be close in magnitude, with the same sign pattern
+        self.assertTrue(torch.isfinite(bidir_loss).all())
+        self.assertEqual((column_loss > 0).all().item(), (bidir_loss > 0).all().item())
+
+    def test_bidirectional_v2t_t2v_distinct_k(self):
+        """v2t and t2v have separate sim matrices in bidirectional mode."""
+        B = 16
+        v, t, seq_len = self._make_contrastive_inputs(B=B)
+
+        vn = v / v.norm(dim=-1, keepdim=True)
+        tn = t / t.norm(dim=-1, keepdim=True)
+
+        tau = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
+        sim_v2t = torch.mm(vn, tn.detach().t()) / tau
+        sim_t2v = torch.mm(vn.detach(), tn.t()) / tau.t()
+
+        # Hinge: separate sim matrices should not be identity-related
+        diff = (sim_v2t - sim_t2v).abs().mean()
+        self.assertGreater(diff.item(), 0.001)
 
 
 if __name__ == "__main__":

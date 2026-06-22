@@ -209,4 +209,10 @@ message PEPNetDCNPLE {
 
     // whether to enable contrastive learning (Phase 1a)
     optional bool contrastive_loss_enabled = 18 [default = false];
+
+    // contrastive alignment mode:
+    //   "column"        = Phase 1a: single-side column alignment (behavior → semantics)
+    //   "bidirectional" = Phase 2: bidirectional row+column alignment
+    //   "row"           = single-side row alignment (semantics → behavior), reserved
+    optional string contrastive_alignment_mode = 19 [default = "column"];
 }

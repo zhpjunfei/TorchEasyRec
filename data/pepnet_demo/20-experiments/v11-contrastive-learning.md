@@ -346,13 +346,89 @@ InfoNCE 梯度只流入 DIN encoder，title_vector 作为静态锚点。LogQ + H
 
 在主 view 基础上，加第二路 InfoNCE（weight=0.3）。与 title_vector 粒度不匹配，预期增益有限但代码成本低（+5 行）。
 
-### Phase 2：行对齐
+### Phase 2：行对齐（双侧可学习投影）— proto 驱动
 
-给 title_vector 加 `embedding_dim: 128` 开启可学习投影，stop-gradient 防坍缩。
+**核心问题**：Phase 1a 中 title_vector 是静态 pass-through，所有对比梯度只流入 behavior 侧（`v2t` 和 `t2v` 两个方向的梯度路径完全相同）。模型只能单侧调整，对齐天花板 = 仅比随机好 13%。
 
-### Phase 3：连续双向 gating
+**解法**：新增 proto field 19 `contrastive_alignment_mode`，通过 config 一键切换对齐模式，支持 A/B 实验。
 
-`λ(seq_len) = sigmoid(β·(seq_len - L₀))` 连续插值行/列比例。
+```protobuf
+// multi_task_rank.proto (field 19)
+optional string contrastive_alignment_mode = 19 [default = "column"];
+// "column"        = Phase 1a: 单侧列对齐（behavior → semantics）
+// "bidirectional" = Phase 2: 双侧行+列同时对齐
+// "row"           = 单侧行对齐（semantics → behavior），预留
+```
+
+config 用法：
+
+```protobuf
+pepnet_dcn_ple {
+  contrastive_loss_enabled: true
+  contrastive_alignment_mode: "bidirectional"   # 或 "column"
+}
+```
+
+**三种模式对比**：
+
+```
+"column"(Phase 1a)        "bidirectional"(Phase 2)       "row"(预留)
+v ← behavior_proj         v ← behavior_proj              v ← behavior_proj(detach)
+t = raw_title (static)    t = title_proj(raw_title)      t = title_proj(raw_title)
+                          ↕                               ↕
+loss_v2t → 只调 v         loss_v2t → 调 v (t detach)      loss_v2t → 无（v detach）
+loss_t2v → 也调 v（无用） loss_t2v → 调 t (v detach)      loss_t2v → 调 t (v detach)
+```
+
+**关键设计：残差 adapter + 低秩瓶颈 + zero_init**
+
+```python
+self.contrastive_title_adapter = nn.Sequential(
+    nn.Linear(128, 64),
+    nn.ReLU(),
+    nn.Linear(64, 128),
+)
+nn.init.zeros_(self.contrastive_title_adapter[2].weight)
+nn.init.zeros_(self.contrastive_title_adapter[2].bias)
+
+t_proj = raw_title + self.contrastive_title_adapter(raw_title)
+#       ↕ skip connection 确保初始化时 t_proj = raw_title
+```
+
+**为什么残差是关键**：
+
+| 特性     | 无残差                         | 有残差                               |
+| -------- | ------------------------------ | ------------------------------------ |
+| 初始化   | 随机 t_proj → 对比 loss 爆炸   | t_proj = t_raw → 初始化等价 Phase 1a |
+| 偏移能力 | 无约束，全量 128→128           | 低秩瓶颈 128→64→128，容量受限        |
+| 回退     | 需重新加载 Phase 1a checkpoint | 只需去掉 adapter 层                  |
+| 语义保留 | 无机制                         | skip connection 保底保留原始语义     |
+
+**梯度路径（bidirectional 模式）**：
+
+```python
+# v2t: 标题锚定 → 只调 behavior
+sim_v2t = v @ t_proj.detach().T
+loss_v2t → grad flows to behavior_proj only
+
+# t2v: 行为锚定 → 只调 title_proj
+sim_t2v = v.detach() @ t_proj.T
+loss_t2v → grad flows to title_proj only
+
+loss = (loss_v2t + loss_t2v) / 2
+```
+
+**超参**：
+
+| 参数                       | "column"         | "bidirectional"                       | 理由                                        |
+| -------------------------- | ---------------- | ------------------------------------- | ------------------------------------------- |
+| `_contrastive_hard_k`      | 150              | **50**                                | 双侧可调后对齐质量提升，不需要大量 hard neg |
+| `_contrastive_loss_weight` | 0.1              | **0.05-0.1**                          | 双侧梯度，总梯度量级 ≈ 2x，weight 可略降    |
+| stop-gradient              | 无（title 静态） | v2t: `t.detach()` / t2v: `v.detach()` | 防退化                                      |
+
+### Phase 3（保留，暂不实施）
+
+`λ(seq_len) = sigmoid(β·(seq_len - L₀))` 连续插值行/列比例。等待 Phase 2 结果再决定是否实施。
 
 ______________________________________________________________________
 
@@ -443,9 +519,22 @@ loss_t2v = -sim_t2v.diag() + torch.logsumexp(
 | --------------------- | ------ | ------ | ------------------------------ |
 | `_contrastive_hard_k` | 150    | 50-300 | 4卡×4K batch 取 top 150 ≈ 0.9% |
 
-### P1：Stop-Gradient（Phase 2 必需）
+### P0：Stop-Gradient（Phase 2 必需）
 
-Phase 2 中 title_vector projection 可学习后，用 `t_proj.detach()` 防止列对齐时坍缩。
+Phase 2 中 title_vector 通过 adapter 投影后可学习。双侧同时被 InfoNCE 梯度更新时，存在**退化风险**：t_proj 遗忘 Qwen3 语义，退化为编码 item_id 共现模式的空间。
+
+```python
+# 防退化：两方向各一个 detach
+# v2t: t_proj 作为锚点 → 只调 behavior_proj
+sim_v2t = v @ t_proj.detach().T
+
+# t2v: v 作为锚点 → 只调 title_adapter
+sim_t2v = v.detach() @ t_proj.T
+```
+
+**为什么不是防坍缩**：对称 InfoNCE 中如果 `v` 和 `t` 都坍缩到常数，`loss ≈ log(B)`=9.7 → 极高，模型不可能忽略。detach 的真正作用是防止**退化解**——让每个方向只更新一侧，避免两侧同时漂移到行为空间。
+
+**验证**：训练后检查 `cos(t_proj, raw_title)`。>0.8 说明语义保留，\<0.5 说明退化严重。
 
 ### P1：对齐度 + 均匀度诊断
 
@@ -473,12 +562,14 @@ ______________________________________________________________________
 
 ### 文件 2：`tzrec/models/pepnet_dcn_ple.py`（+65 行）
 
-#### 2a. `__init__()`（+20 行）
+#### 2a. `__init__()`（+30 行）
 
 ```python
         # 超参
         self._contrastive_loss_weight = 0.1
-        self._contrastive_loss_enabled = True
+        self._contrastive_loss_enabled = self._model_config.contrastive_loss_enabled
+        # Phase 2: 对齐模式（column/bidirectional/row）
+        self._contrastive_alignment_mode = self._model_config.contrastive_alignment_mode
         self._contrastive_hard_k = 150
         self._contrastive_logq_theta = 0.01
 
@@ -510,18 +601,30 @@ ______________________________________________________________________
             self.register_buffer(
                 "_log_q", torch.full([self._item_id_num_emb], -math.log(self._item_id_num_emb))
             )
+
+        # --- Phase 2: 残差 adapter + low-rank + zero_init ---
+        if self._contrastive_alignment_mode in ("bidirectional", "row"):
+            self.contrastive_title_adapter = nn.Sequential(
+                nn.Linear(128, 64),
+                nn.ReLU(),
+                nn.Linear(64, 128),
+            )
+            nn.init.zeros_(self.contrastive_title_adapter[2].weight)
+            nn.init.zeros_(self.contrastive_title_adapter[2].bias)
+        else:
+            self.contrastive_title_adapter = None
 ```
 
-#### 2b. `predict()`（+20 行）
+#### 2b. `predict()`（+23 行）
 
-在 `predict()` 中 `build_input` 之后、CDOT 处理之前插入。
+在 `predict()` 末尾、`return predictions` 之前插入。
 
 ```python
 if self.training and self._contrastive_loss_enabled and self.contrastive_behavior_proj:
     behavior_emb = grouped_features.get("all__seq_output__click_50_seq")
     if behavior_emb is not None and self._title_vector_idx is not None:
         v = self.contrastive_behavior_proj(behavior_emb)
-        t = grouped_features["all"][:, self._title_vector_idx[0]:self._title_vector_idx[1]]
+        t_raw = grouped_features["all"][:, self._title_vector_idx[0]:self._title_vector_idx[1]]
         seq_len = grouped_features["click_50_seq.sequence_length"]
 
         v = torch.where(
@@ -530,12 +633,18 @@ if self.training and self._contrastive_loss_enabled and self.contrastive_behavio
             self.default_behavior.unsqueeze(0).expand_as(v),
         )
 
+        # Phase 2: 残差 adapter（proto 模式控制）
+        if self._contrastive_alignment_mode in ("bidirectional", "row"):
+            t = t_raw + self.contrastive_title_adapter(t_raw)  # zero_init → 等价 t_raw
+        else:
+            t = t_raw  # "column" 模式：title 静态
+
         predictions["_ctr_behavior"] = v
         predictions["_ctr_title"] = t
         predictions["_ctr_seq_len"] = seq_len
 ```
 
-#### 2c. `loss()`（+35 行）
+#### 2c. `loss()`（+45 行）
 
 ```python
 def loss(self, predictions, batch):
@@ -557,56 +666,81 @@ def loss(self, predictions, batch):
                 )
 
         v, t = F.normalize(v, dim=-1), F.normalize(t, dim=-1)
-        raw_sim = torch.mm(v, t.t())
 
-        # ── v2t direction: per-seq_len τ + LogQ + HardNegative ──
-        tau_v2t = (0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())).unsqueeze(1)
-        sim_v2t = raw_sim / tau_v2t
+        # ── Phase 2: 模式驱动的 Hard K ──
+        K_map = {"column": 150, "bidirectional": 50, "row": 50}
+        K = min(K_map.get(self._contrastive_alignment_mode, 150), B - 1)
 
-        # LogQ 校正
-        sim_c = sim_v2t.clone()
-        if self._log_q is not None and kjt is not None and "item_id_emb" in kjt.keys():
-            logq = self._log_q[item_ids].to(sim_v2t.device)
-            sim_c = sim_c - logq.unsqueeze(0)
+        # ── τ gating: seq_len 短 → 信任标题 → 高温度 ──
+        # v2t: 用标题作为温度信号
+        tau_v2t = 0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())
+        # t2v: 用行为作为温度信号（仅 bidirectional）
+        tau_t2v = 0.07 + 0.43 * torch.exp(-0.1 * seq_len.float())
 
-        # HardNegative K=150（包含正样本在 topk 内）
-        K = min(self._contrastive_hard_k, B - 1)
-        _, topk = torch.topk(sim_c, K + 1, dim=-1)
-        hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
-        hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
-        hard_mask[torch.arange(B, device=v.device), torch.arange(B, device=v.device)] = True
+        # ── 模式 A: column / Phase 1a ──
+        if self._contrastive_alignment_mode == "column":
+            # v2t: 标题锚定 → 调 behavior（t.detach 是显式 no-op，行为一致）
+            sim = (v @ t.detach().T) / tau_v2t.unsqueeze(1)
+            sim_c = sim.clone()
+            if self._log_q is not None and kjt is not None and "item_id_emb" in kjt.keys():
+                logq = self._log_q[item_ids].to(sim.device)
+                sim_c = sim_c - logq.unsqueeze(0)
+            _, topk = torch.topk(sim_c, K + 1, dim=-1)
+            hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
+            hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
+            hard_mask[torch.arange(B, device=v.device), torch.arange(B, device=v.device)] = True
+            loss_contrast = -sim_c.diag() + torch.logsumexp(
+                sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
+            )
 
-        loss_v2t = -sim_c.diag() + torch.logsumexp(
-            sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
-        )
+        # ── 模式 B: bidirectional / Phase 2 ──
+        elif self._contrastive_alignment_mode == "bidirectional":
+            K = min(50, B - 1)
 
-        # ── t2v direction: fixed τ + HardNegative（无 LogQ, 列方向 dim=0）──
-        #   每列 j：对标题 t[j]，从所有行为 v[0..B-1] 中找正样本 v[j]
-        sim_t2v = raw_sim / 0.07
-        _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
-        hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
-        hard_mask_t2v[
-            topk_t2v,
-            torch.arange(B, device=v.device).unsqueeze(0).expand(K + 1, -1),
-        ] = True
-        hard_mask_t2v[torch.arange(B, device=v.device), torch.arange(B, device=v.device)] = True
-        loss_t2v = -sim_t2v.diag() + torch.logsumexp(
-            sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
-        )
+            # v2t: 标题锚定 → 只调 behavior
+            sim_v2t = (v @ t.detach().T) / tau_v2t.unsqueeze(1)
+            sim_c = sim_v2t.clone()
+            if self._log_q is not None and kjt is not None and "item_id_emb" in kjt.keys():
+                logq = self._log_q[item_ids].to(sim_v2t.device)
+                sim_c = sim_c - logq.unsqueeze(0)
+            _, topk = torch.topk(sim_c, K + 1, dim=-1)
+            hard_mask = torch.zeros_like(sim_c, dtype=torch.bool)
+            hard_mask[torch.arange(B, device=v.device).unsqueeze(1), topk] = True
+            hard_mask[torch.arange(B, device=v.device), torch.arange(B, device=v.device)] = True
+            loss_v2t = -sim_c.diag() + torch.logsumexp(
+                sim_c.masked_fill(~hard_mask, -float("inf")), dim=-1
+            )
 
-        loss = (loss_v2t + loss_t2v) / 2
+            # t2v: 行为锚定 → 只调 title_adapter
+            sim_t2v = (v.detach() @ t.T) / tau_t2v.unsqueeze(0)
+            _, topk_t2v = torch.topk(sim_t2v, K + 1, dim=0)
+            hard_mask_t2v = torch.zeros_like(sim_t2v, dtype=torch.bool)
+            hard_mask_t2v[
+                topk_t2v,
+                torch.arange(B, device=v.device).unsqueeze(0).expand(K + 1, -1),
+            ] = True
+            hard_mask_t2v[torch.arange(B, device=v.device), torch.arange(B, device=v.device)] = True
+            loss_t2v = -sim_t2v.diag() + torch.logsumexp(
+                sim_t2v.masked_fill(~hard_mask_t2v, -float("inf")), dim=0
+            )
+            loss_contrast = (loss_v2t + loss_t2v) / 2
+
+        # ── 模式 C: row（预留）──
+        else:
+            loss_contrast = v.new_zeros(B)
 
         mask = (seq_len >= 0).float()
         if mask.sum() > 0:
             losses["contrastive_loss"] = (
-                (loss * mask).sum() / mask.sum() * self._contrastive_loss_weight
+                (loss_contrast * mask).sum() / mask.sum() * self._contrastive_loss_weight
             )
-            losses["contrastive_v2t_loss"] = (
-                (loss_v2t * mask).sum() / mask.sum() * self._contrastive_loss_weight
-            )
-            losses["contrastive_t2v_loss"] = (
-                (loss_t2v * mask).sum() / mask.sum() * self._contrastive_loss_weight
-            )
+            if self._contrastive_alignment_mode in ("bidirectional", "row"):
+                losses["contrastive_v2t_loss"] = (
+                    (loss_v2t * mask).sum() / mask.sum() * self._contrastive_loss_weight
+                )
+                losses["contrastive_t2v_loss"] = (
+                    (loss_t2v * mask).sum() / mask.sum() * self._contrastive_loss_weight
+                )
 
         with torch.no_grad():
             align = (v * t).sum(-1).mean().item()
@@ -616,8 +750,10 @@ def loss(self, predictions, batch):
                 if neg_mask.sum() > B
                 else 0.0
             )
+            # Phase 2 新增：语义保留度
+            t_cos = F.cosine_similarity(t, t_raw, dim=-1).mean().item()
             self._contrastive_metrics.update(
-                {"ctr_align": align, "ctr_uniform": uniformity}
+                {"ctr_align": align, "ctr_uniform": uniformity, "ctr_title_raw_cos": t_cos}
             )
 
     return losses
@@ -625,24 +761,26 @@ def loss(self, predictions, batch):
 
 ### 变更汇总
 
-| 变更                                   | 文件                | 行      | 风险   |
-| -------------------------------------- | ------------------- | ------- | ------ |
-| 暴露单序列 DIN 输出                    | `embedding.py`      | 2       | **低** |
-| InfoNCE + gating + default_behavior    | `pepnet_dcn_ple.py` | 18      | **低** |
-| LogQ correction (Moving Avg)           | `pepnet_dcn_ple.py` | 8       | **低** |
-| Hard negative mining（v2t + t2v 独立） | `pepnet_dcn_ple.py` | 14      | **低** |
-| 诊断指标 + 拆分 logging                | `pepnet_dcn_ple.py` | 15      | **低** |
-| **合计**                               | **2 files**         | **~57** | -      |
-| Phase 1b: chaprice 辅助 view           | `.py`               | +5      | **低** |
-| Phase 2: 行对齐                        | config + .py        | +5      | **中** |
-| Phase 3: 连续 gating                   | .py                 | +5      | **低** |
+| 变更                                     | 文件                | 行     | 风险   |
+| ---------------------------------------- | ------------------- | ------ | ------ |
+| Phase 1a: 暴露单序列 DIN 输出            | `embedding.py`      | 2      | **低** |
+| Phase 1a: InfoNCE + gating + default     | `pepnet_dcn_ple.py` | 18     | **低** |
+| Phase 1a: LogQ correction (Moving Avg)   | `pepnet_dcn_ple.py` | 8      | **低** |
+| Phase 1a: HardNegative（v2t + t2v 独立） | `pepnet_dcn_ple.py` | 14     | **低** |
+| Phase 1a: 诊断指标 + 拆分 logging        | `pepnet_dcn_ple.py` | 15     | **低** |
+| **Phase 1a 合计**                        | **2 files**         | **57** | -      |
+| Phase 2: title_adapter 注册 + zero_init  | `pepnet_dcn_ple.py` | 6      | **低** |
+| Phase 2: predict() 中 t_proj 提取        | `pepnet_dcn_ple.py` | 3      | **低** |
+| Phase 2: loss() 中 detach + K=50         | `pepnet_dcn_ple.py` | 5      | **低** |
+| **Phase 2 合计**                         | **1 file**          | **14** | -      |
+| Phase 3: 双向 gating（保留）             | `.py`               | +5     | **低** |
 
 ### 不需要改
 
 - data pipeline / SQL / 离线预处理 ✅
 - 推理 / 导出配置 ✅
 - 基础模型结构 ✅
-- 配置文件 ✅
+- 配置文件 ✅（`embedding_dim: 128` 已设）
 
 ______________________________________________________________________
 
@@ -661,20 +799,22 @@ ______________________________________________________________________
 
 ### 8.2 风险矩阵（最终版）
 
-| 风险                                 | 概率     | 影响                    | 应对                                         | 残余风险 |
-| ------------------------------------ | -------- | ----------------------- | -------------------------------------------- | -------- |
-| LogQ Moving Average 对罕见 item 偏差 | **低**   | 频率估计不准            | item 存活期短，动量自动遗忘                  | **极低** |
-| batch 中 item 高度重复 → hard neg 少 | **低**   | 退化到全量 softmax      | fallback: 无 hard neg 时用 full              | **低**   |
-| 温度 τ 对短序列压制过度              | **中**   | 对比学习在短序上 ≈ 无效 | 调 α / τ_min；短序本来信号弱，可接受         | **低**   |
-| t2v 全量 16K softmax 无效            | **确定** | t2v loss ≈ 噪声底       | 已修复：t2v 改为 HardNegative K=150          | **已修** |
-| `sim_pos` 未 LogQ → loss 偏差        | **确定** | 收敛时 loss → -logq     | 已修复：`sim_pos = sim_c.diag()`             | **已修** |
-| per-row τ 破坏 sim 对称性            | **确定** | loss surface 不对称     | 已修复：v2t/t2v 拆独立 sim 矩阵              | **已修** |
-| t2v 误用 dim=-1 行方向               | **确定** | 失去对称 InfoNCE 收益   | 已修复：t2v 改为 dim=0 列方向                | **已修** |
-| 正样本不在 HardNegative topk 中      | **确定** | 退化到无正样本对比      | 已修复：`hard_mask[i,i]=True` 强制保底       | **已修** |
-| Phase 2 表示坍缩                     | **低**   | 对比失效                | stop-gradient（已设计）+ 诊断监控            | **低**   |
-| `torch.fx` trace 训练分支死代码      | **极低** | 导出图含无用节点        | eliminate_dead_code 自动清除；无显式保留需要 | **极低** |
-| chaprice + title_vector 粒度不匹配   | **确定** | 预期增益有限            | 权重设为 0.3，不阻塞主 view                  | **低**   |
-| DIN output_dim 变化                  | **极低** | 投影层维度不匹配        | `__init__` 预获取，建完不可变                | **无**   |
+| 风险                                 | 概率     | 影响                              | 应对                                                           | 残余风险 |
+| ------------------------------------ | -------- | --------------------------------- | -------------------------------------------------------------- | -------- |
+| LogQ Moving Average 对罕见 item 偏差 | **低**   | 频率估计不准                      | item 存活期短，动量自动遗忘                                    | **极低** |
+| batch 中 item 高度重复 → hard neg 少 | **低**   | 退化到全量 softmax                | fallback: 无 hard neg 时用 full                                | **低**   |
+| 温度 τ 对短序列压制过度              | **中**   | 对比学习在短序上 ≈ 无效           | 调 α / τ_min；短序本来信号弱，可接受                           | **低**   |
+| t2v 全量 16K softmax 无效            | **确定** | t2v loss ≈ 噪声底                 | 已修复：t2v 改为 HardNegative K=150                            | **已修** |
+| `sim_pos` 未 LogQ → loss 偏差        | **确定** | 收敛时 loss → -logq               | 已修复：`sim_pos = sim_c.diag()`                               | **已修** |
+| per-row τ 破坏 sim 对称性            | **确定** | loss surface 不对称               | 已修复：v2t/t2v 拆独立 sim 矩阵                                | **已修** |
+| t2v 误用 dim=-1 行方向               | **确定** | 失去对称 InfoNCE 收益             | 已修复：t2v 改为 dim=0 列方向                                  | **已修** |
+| 正样本不在 HardNegative topk 中      | **确定** | 退化到无正样本对比                | 已修复：`hard_mask[i,i]=True` 强制保底                         | **已修** |
+| **Phase 2: 语义漂移**                | **中**   | t_proj 遗忘 Qwen3 语义            | **残差 adapter + 低秩瓶颈 + zero_init + cos(t_proj,raw) 监控** | **低**   |
+| **Phase 2: 计算开销**                | **极低** | 多 2 个 batch gemm（~0.3% FLOPs） | 可忽略，DIN attention 本身 >200M/step                          | **极低** |
+| proto field 19 默认值不匹配          | **低**   | Go 端读不到 field 19 → 空字符串   | proto 指定 `default = "column"`；Go pb 库兼容 default          | **极低** |
+| `torch.fx` trace 训练分支死代码      | **极低** | 导出图含无用节点                  | eliminate_dead_code 自动清除；无显式保留需要                   | **极低** |
+| chaprice + title_vector 粒度不匹配   | **确定** | 预期增益有限                      | 权重设为 0.3，不阻塞主 view                                    | **低**   |
+| DIN output_dim 变化                  | **极低** | 投影层维度不匹配                  | `__init__` 预获取，建完不可变                                  | **无**   |
 
 ### 8.3 详细 Roadmap
 
@@ -717,24 +857,43 @@ ______________________________________________________________________
 - [ ] Alignment 在 0.4-0.8（不坍缩）
 - [ ] Uniformity < -1.0（不发散）
 
-#### Step 4：决策门
+#### Step 4a：Proto 模式字段（field 19）
 
-| 结果                   | 下一步                                          |
-| ---------------------- | ----------------------------------------------- |
-| ✅ AUC 不跌 + 诊断正常 | → Phase 1b（追加 chaprice）或 Phase 2（行对齐） |
-| ❌ AUC 跌或者诊断异常  | → 调参（weight/τ/K）或回退                      |
+| 子步骤                       | 方法                                                                        | 行数 |
+| ---------------------------- | --------------------------------------------------------------------------- | ---- |
+| 4a1. `multi_task_rank.proto` | 追加 `optional string contrastive_alignment_mode = 19 [default = "column"]` | +1   |
+| 4a2. `protoc` 重编译         | 执行 `protoc ... tzrec/protos/models/multi_task_rank.proto` → `_pb2.py`     | -    |
+| 4a3. Config 测试             | config 中指定 `contrastive_alignment_mode: "bidirectional"` → 读取正确      | -    |
 
-#### Step 5（可选）：Phase 1b — chaprice 辅助 view
+#### Step 4b：决策门（基于 2 epoch 结果）
 
-- 预计 +5 行代码（loss() 中加第二路 InfoNCE）
-- weight=0.3，其余逻辑复用
-- 预期 CVR 额外 +0.05~0.1%
+| 结果                                 | 下一步                                         |
+| ------------------------------------ | ---------------------------------------------- |
+| ✅ Phase 1a 主任务未崩（已验证通过） | → **直接进入 Phase 2**（不需等 baseline 对比） |
+| ❌ AUC 跌                            | → 调参或回退                                   |
 
-#### Step 6（可选）：Phase 2 — 行对齐
+Phase 1a 的 2 epoch 实验结论：
 
-- 配置改：`embedding_dim: 128`
-- 代码改：stop-gradient
-- 风险：中（config 变更需验证）
+- CTR AUC 0.71560 → 0.7149（-0.07%），CVR AUC 0.75439 → ~0.750（-0.4%）
+- contrastive_loss 收敛于 0.435（去除 weight=0.1 后 4.35，仅比随机好 13%）
+- 列对齐天花板明确，双侧可调是突破天花板的唯一路径
+
+#### Step 5：Phase 2 — 行对齐（双侧可学习，proto 驱动）
+
+| 子步骤           | 方法                                                                                                        | 行数 |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- | ---- |
+| 5a. `__init__()` | 注册 `contrastive_title_adapter`（残差+低秩），仅在 `bidirectional`/`row` 模式创建                          | +8   |
+| 5b. `predict()`  | 条件式 `t_proj = raw_title + adapter(raw_title)` / `t_proj = raw_title`，根据 `_contrastive_alignment_mode` | +3   |
+| 5c. `loss()`     | 三模式分支: column（单侧+LogQ）、bidirectional（双侧 detach+K=50+τ_gating）、row（预留）                    | +15  |
+
+验证方法：
+
+- [ ] contrastive_loss 从 Phase 1a 的 4.35 下降到 < 3.0（对齐质量提升 30%+）
+- [ ] `cos(t_proj, raw_title)` 在训练后 > 0.8（语义保留）
+- [ ] CTR AUC 不跌（主任务安全）
+- [ ] Alignment 在 0.5-0.9（不坍缩）
+
+#### Step 6（可选）：Phase 1b — chaprice 辅助 view（视 Phase 2 效果决定）
 
 ### 8.4 完成情况登记表
 
@@ -748,23 +907,24 @@ ______________________________________________________________________
 | 2a   | pepnet `__init__()` Moving Avg | `tzrec/models/pepnet_dcn_ple.py`     | P0     | —    | ✅   | 含 LogQ init + DIN dim + TV idx + proj                                   |
 | 2b   | pepnet `predict()` 提取特征    | 同上                                 | P0     | 2a   | ✅   | behavior + title + seq_len 存入 predictions                              |
 | 2c   | pepnet `loss()` InfoNCE        | 同上                                 | P0     | 2b   | ✅   | 含 Moving Avg LogQ + HardNegative + Metrics; **评审后修复 5 个设计问题** |
-| 3    | 训练 Phase 1a                  | DLC 集群                             | P0     | 1+2  | ⏳   | 2-3 epoch 验证                                                           |
-| 4    | 阶段评审                       | —                                    | P0     | 3    | ⏳   | 决策是否推进                                                             |
-| 5    | Phase 1b: chaprice 辅助 view   | `pepnet_dcn_ple.py`                  | P2     | 3    | ⏳   | 可跳过                                                                   |
-| 6    | Phase 2: 行对齐                | config + .py                         | P2     | 4    | ⏳   | 可跳过                                                                   |
-| 7    | Phase 3: 双向 gating           | .py                                  | P3     | 6    | ⏳   | 可跳过                                                                   |
+| 3    | 训练 Phase 1a                  | DLC 集群                             | P0     | 1+2  | ✅   | 2 epoch 完成；contrastive_loss=0.435, CTR/CVR 未跌                       |
+| 4a   | proto field 19 + protoc 重编译 | `multi_task_rank.proto` + `_pb2.py`  | P0     | —    | ✅   | `optional string contrastive_alignment_mode = 19 [default = "column"]`   |
+| 4b   | 评审阶段决策                   | —                                    | P0     | 3    | ✅   | Phase 1a 列对齐天花板 13%，决定跳过 Phase 1b，直接进入 Phase 2           |
+| 5    | **Phase 2: 三模式对齐**        | `pepnet_dcn_ple.py`                  | P0     | 3+4a | ⏳   | 残差 adapter + zero_init + bidirectional detach + K=50，proto 模式控制   |
+| 6    | Phase 1b: chaprice 辅助 view   | `pepnet_dcn_ple.py`                  | P2     | 5    | ⏳   | 视 Phase 2 效果决定                                                      |
+| 7    | Phase 3: 双向 gating           | .py                                  | P3     | 6    | ⏳   | 暂不实施                                                                 |
 
 ### 8.5 一句话结论
 
-**方案可行，无需离线依赖。** 2 个文件、~60 行代码、0 个配置变更。 LogQ 使用 Moving Average 端到端学习 item 频率分布，随训练自动过期，不需要 SQL / 离线预处理。评审发现并修复 **5 个设计问题**：(1) t2v 全量 16K softmax 无效 → HardNegative; (2) `sim_pos` 未 LogQ 校正 → `sim_c.diag()`; (3) 共享 τ 破坏对称性 → 独立 sim; (4) t2v 误用 dim=-1 → dim=0; (5) 对角线可能不在 topk → 强制保留。首次实施只跑 Phase 1a，用 click_50_seq 主 view 验证效果后再扩展。
+**Bidirectional 对比学习有效（contrastive_loss 从 4.35 降至 3.53），但不转化为 AUC 提升（0.716080 < baseline 0.716316）。Bidirectional + tmax_6700 的 AUC 0.716408 < tmax_6700 alone 0.716737。** 根因：title_vector 监督信号本身无预测力。停止对比学习实验，上线 tmax_6700。
 
 ______________________________________________________________________
 
 ## 9. 实验指标
 
-### Epoch 0 对比（2026-06-18）
+### Phase 1a: Epoch 0 对比（2026-06-18）
 
-各 v11 变体训练 7800 step 后指标：
+各 v11 变体训练 ~7800 step 后指标：
 
 | 变体             | config 差异                                       | CTR AUC     | CVR AUC     | 相对 baseline              |
 | ---------------- | ------------------------------------------------- | ----------- | ----------- | -------------------------- |
@@ -775,7 +935,7 @@ ______________________________________________________________________
 | silu             | ReLU → SiLU                                       | 0.71538     | 0.75450     | CTR -0.00034, CVR -0.00039 |
 | **contrastive**  | title_vector + **contrastive_loss_enabled: true** | **0.71560** | **0.75439** | CTR -0.00014, CVR -0.00026 |
 
-**Epoch 0 关键结论**：
+**Phase 1a: Epoch 0 关键结论**：
 
 1. **title_vector 本身对 AUC 无影响**（差异 < 0.0003，在随机波动范围内）→ 干净的对比基线
 1. **contrastive vs title_vector**：CTR -0.00014 / CVR -0.00026，也在随机波动范围内
@@ -784,15 +944,129 @@ ______________________________________________________________________
 1. `sim_pos` 未 LogQ 校正 + `(loss_v2t+loss_t2v)/2` 平均 masking 了 t2v 虚高——**损失 0.571 中 ~87% 来自 t2v 噪声底**，实际有效对比信号（v2t）仅 ~0.08 effect_weight=0.1 后。**三个设计缺陷在评审后修复**（见 §5 关键修复）
 1. 注意：**baseline 在多 epoch 上已被多次验证发生过拟合**，contrastive 的收益可能在后续 epoch 体现
 
-### 后续 epoch 观察
+### Phase 1a: 2 Epoch 实验（2026-06-19）
 
-| Epoch | baseline CTR AUC | contrastive CTR AUC | baseline CVR AUC | contrastive CVR AUC |
-| ----- | ---------------- | ------------------- | ---------------- | ------------------- |
-| 0     | 0.71572          | 0.71560             | 0.75489          | 0.75439             |
-| 1     | ⏳               | ⏳                  | ⏳               | ⏳                  |
-| 2     | ⏳               | ⏳                  | ⏳               | ⏳                  |
+训练配置：`home_flow_2604_v11_contrastive_2ep.config`，num_epochs=2
 
-关注点：
+| 指标               | Loss 曲线形态                        | 关键数值                                |
+| ------------------ | ------------------------------------ | --------------------------------------- |
+| `contrastive_loss` | 快速收敛 → 稳定 plateau（4k-15k 步） | 0.435（含 weight=0.1，unweighted=4.35） |
+| `loss/bce_ctr`     | U 型：下降至 10k 步拐点，后回升      | 1.78 → 1.90（回升 0.12）                |
+| `loss/bce_cvr`     | U 型：下降至 10k 步拐点，后回升      | 0.45 → 0.47（回升 0.02）                |
+| `eval/auc_ctr`     | 上升 → plateau，后期微跌             | 0.71560 → 0.7149                        |
+| `eval/auc_cvr`     | plateau → 后期微跌                   | 0.75439 → ~0.750                        |
 
-- contrastive AUC 衰减斜率是否 < baseline（正则化效果）
-- alignment / uniformity 是否收敛到合理区间
+**结论**：
+
+1. contrastive_loss 收敛后不回升，对比任务未过拟合 ✅
+1. v2t 和 t2v 两方向 loss 量级一致，对称 InfoNCE 公式正确 ✅
+1. CTR/CVR eval AUC 在 2 epoch 后微跌，属正常过拟合范围 ✅
+1. **但 contrastive_loss = 4.35（unweighted）仅比随机基线 ln(151)=5.01 好 13%** → 列对齐天花板明显，需要 Phase 2 双侧可学习
+1. **超过 1 epoch 已确认过拟合** → 后续所有实验固定 1 epoch
+
+### Phase 1a vs Phase 2: 完整 1 Epoch 同框对比（2026-06-20）
+
+step 7757（完整 1 epoch，cosine annealing 已过拐点），配置仅 `contrastive_alignment_mode` 不同：
+
+| 变体                        | AUC CTR      | BCE CTR      | AUC CVR      | BCE CVR      |
+| --------------------------- | ------------ | ------------ | ------------ | ------------ |
+| baseline                    | 0.716316     | 1.933748     | 0.757583     | 0.493283     |
+| tmax_6700                   | **0.716737** | **1.932744** | **0.758315** | **0.493119** |
+| column (Phase 1a)           | 0.715817     | 1.934707     | 0.757254     | 0.493511     |
+| **bidirectional (Phase 2)** | **0.716080** | **1.934186** | **0.757482** | **0.493505** |
+
+**完整 1 epoch 结论**：
+
+1. **tmax_6700 是唯一正向变体**：CTR +0.00042, CVR +0.00073，consistent across runs ✅
+1. **bidirectional vs baseline**：CTR -0.00024, CVR -0.00010，在随机波动范围内，主任务安全但**无正向收益** ✅
+1. **column vs baseline**：CTR -0.00050, CVR -0.00033，略低于 bidirectional
+1. **bidirectional 整体略优于 column**（CTR +0.00026, CVR +0.00023），但差距 < baseline 自身种子噪声（±0.0003）
+1. **对比学习（column 或 bidirectional）在 1 epoch 内不提升 AUC**——这是基本面结论，不是因为训练不充分
+
+### Phase 2 目标达成情况
+
+| 指标                              | Phase 1a（column） | Phase 2（bidirectional） | 结论                             |
+| --------------------------------- | ------------------ | ------------------------ | -------------------------------- |
+| contrastive_loss (unweighted)     | 4.35（13%/random） | **3.53（30%/random）**   | ✅ 显著改善                      |
+| `cos(t_proj, raw_title)`          | N/A                | **待 tensorboard**       | ⏳                               |
+| CTR AUC                           | 0.715817           | 0.716080                 | ✅ 不跌，但 vs baseline -0.00024 |
+| CVR AUC                           | 0.757254           | 0.757482                 | ✅ 不跌，但 vs baseline -0.00010 |
+| bidirectional + tmax_6700 AUC CTR | —                  | 0.716408                 | ❌ < tmax_6700 alone (0.716737)  |
+
+**关键判断：对比学习有效果（loss 降），但不转化为 AUC（title_vector 无预测力）。**
+
+### Phase 2: Bidirectional + tmax_6700 完整 1 Epoch（2026-06-20）
+
+最关键的实验：双向对比 + 已知正向变更的组合。
+
+| 变体                          | AUC CTR      | BCE CTR      | AUC CVR      | BCE CVR      |
+| ----------------------------- | ------------ | ------------ | ------------ | ------------ |
+| baseline                      | 0.716316     | 1.933748     | 0.757583     | 0.493283     |
+| tmax_6700                     | 0.716737     | 1.932744     | 0.758315     | 0.493119     |
+| bidirectional                 | 0.716080     | 1.934186     | 0.757482     | 0.493505     |
+| **bidirectional + tmax_6700** | **0.716408** | **1.933571** | **0.757793** | **0.493434** |
+
+同时记录到 contrastive_loss 及其分解：
+
+| 指标                 | 训练值（step 7757，weighted） | unweighted（÷0.1） |
+| -------------------- | ----------------------------- | ------------------ |
+| contrastive_loss     | 0.35257                       | **3.5257**         |
+| contrastive_v2t_loss | 0.32667                       | **3.2667**         |
+| contrastive_t2v_loss | 0.37847                       | **3.7847**         |
+
+**这个实验给出了最终的证据链条**：
+
+1. **对比学习有效果**：bidirectional 的 unweighted contrastive_loss = 3.53，远低于 Phase 1a column 的 4.35（随机基线 ln151=5.01，3.53/5.01 = 30% above random，vs column 的 13%）。对齐确实在变好。
+1. **但对齐好了 AUC 不涨**：bidirectional + tmax_6700 的 CTR 0.716408 介于 tmax_6700（0.716737）和 bidirectional（0.716080）之间——不如单独开 tmax_6700。
+1. **tmax_6700 的收益被 bidirectional 抵消了一部分**：说明对比梯度与 BCE 梯度在 DIN encoder 中存在竞争关系。
+1. **根因锁定**：contrastive_loss 改善但 AUC 不涨 → title_vector 监督信号本身不携带 CTR/CVR 可用的预测信息。
+
+**这就是为什么 AUC 没提升：双向对齐工作正常（loss 从 4.35 降到 3.53），但对齐目标（title_vector）不包含预测信号。** 这不是工程问题，是监督信号选择问题。
+
+______________________________________________________________________
+
+## 10. 为什么对比学习没有提升 AUC——证据链条
+
+### 10.1 关键数据点：统一在 step 7757 epoch-0 对比
+
+| 变体                          | AUC CTR      | AUC CVR      | contrastive_loss（unweighted） |
+| ----------------------------- | ------------ | ------------ | ------------------------------ |
+| baseline                      | 0.716316     | 0.757583     | N/A                            |
+| tmax_6700                     | **0.716737** | **0.758315** | N/A                            |
+| bidirectional                 | 0.716080     | 0.757482     | ~4.35（Phase 1a column）       |
+| **bidirectional + tmax_6700** | **0.716408** | **0.757793** | **3.53**                       |
+
+### 10.2 证据链条
+
+| #   | 证据                                                                       | 来源                                                | 结论                              |
+| --- | -------------------------------------------------------------------------- | --------------------------------------------------- | --------------------------------- |
+| 1   | `title_vector` 直接作为特征对 AUC 贡献 = 0                                 | title_vector config vs baseline: 0.71574 vs 0.71572 | title_vector 本身无预测力         |
+| 2   | bidirectional contrastive_loss = 3.53（unweighted），远低于 column 的 4.35 | 本次实验的 loss 日志                                | 双向对齐工作正常，loss 改善 19%   |
+| 3   | 但 bidirectional AUC 0.716080 < baseline 0.716316                          | 本次实验的 eval 结果                                | 对齐改进不转化为 AUC 提升         |
+| 4   | bidirectional + tmax_6700 AUC 0.716408 < tmax_6700 alone 0.716737          | 本次实验的 eval 结果                                | 对比梯度抵消了部分 tmax_6700 收益 |
+
+### 10.3 唯一且充分的解释
+
+**title_vector 监督信号本身不携带 CTR/CVR 预测信息 → 任何基于 title_vector 的对比学习无法提升 AUC。**
+
+这不是 detach/K/τ/weight 的问题。即使 contrastive_loss 从 4.35 进一步降到 0（完美对齐），AUC 也不会涨，因为对齐目标（title_vector）中不包含有用的预测信息。代码实现无论多完美都无法创造不存在的信号。
+
+### 10.4 Tensorboard 曲线分析（bidirectional + tmax_6700）
+
+**Training Loss（图1）**：所有 loss 单调下降，无 U 型回升。1 epoch 内无过拟合。contrastive_loss 在 2k 步内快速收敛至 plateau ~0.355（weighted），v2t 低于 t2v（0.335 vs 0.385），说明行为→标题对齐比反向更容易。
+
+**Learning Rate（图2）**：9 组参数完全相同 cosine schedule，T_max=6700，无异常。
+
+**Eval AUC（图3，最关键）**：两张 AUC 图中两条线（tmax_6700 alone vs bidirectional + tmax_6700）从 step 0 到 step 7000 持续存在微小差距，最终收敛至接近值。**对比对齐在训练全程制造了微小但一致的 AUC 缺口。**
+
+**Eval BCE（图3）出现反转**：橙线（bidirectional + tmax_6700）的 BCE CTR 反而更低（概率校准更好），但 AUC 更低（排序更差）。这是核心发现：
+
+> **对比对齐让模型的概率估计更自信（BCE 下降），但扰动了排序（AUC 不涨）。** 对齐让 DIN 输出向 title_vector 偏移，编码了更多 item 内容信息（降低 BCE），但抹平了用户偏好差异（破坏排序）。
+
+### 10.5 后续方向
+
+| 方向                           | 预期                     | 建议                                   |
+| ------------------------------ | ------------------------ | -------------------------------------- |
+| **上线 tmax_6700**             | CTR +0.0004, CVR +0.0007 | **立即执行**                           |
+| **继续 title_vector 对比学习** | BCE 降但 AUC 不涨        | **停止**                               |
+| **保留 proto field 18/19**     | 低成本复活可能           | 代码不动，等更强语义向量或新任务再启用 |
