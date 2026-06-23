@@ -1,10 +1,12 @@
-# V11 Title Vector Contrastive Learning — 完整设计方案
+# V11 实验日志：对比学习 → Label Smoothing → LR 调度
 
 ## 1. 背景
 
 ### 问题
 
 当前 v11 config 已将 title_vector（128-dim 文本语义向量）加入特征组，直接作为 raw_feature 输入 model。但它是**静态的**——只携带通用语义信息，没有个性化行为信号。
+
+> **注**：本文档始于对比学习设计，后扩展为完整的 v11 实验日志。对比学习部分（§1-10）已冻结，§11 起为 label smoothing + LR 调度实验。
 
 用户的历史行为序列（click_50_seq 等）中包含丰富的偏好信息，但当前 DIN 编码器只被 CTR/CVR 任务的梯度间接优化，缺少一个**专门的语义对齐信号**。
 
@@ -1070,3 +1072,119 @@ ______________________________________________________________________
 | **上线 tmax_6700**             | CTR +0.0004, CVR +0.0007 | **立即执行**                           |
 | **继续 title_vector 对比学习** | BCE 降但 AUC 不涨        | **停止**                               |
 | **保留 proto field 18/19**     | 低成本复活可能           | 代码不动，等更强语义向量或新任务再启用 |
+| **Label smoothing 实验**       | 见 §11                   | 2026-06-22 完成                        |
+
+______________________________________________________________________
+
+## 11. Label Smoothing + LR 调度实验（2026-06-22）
+
+### 11.1 动机
+
+前序实验揭示的核心矛盾：
+
+| 现象                              | 解读                               |
+| --------------------------------- | ---------------------------------- |
+| 1 epoch BCE 单调下降，无 U 型回升 | 模型在 1 epoch 内尚未收敛          |
+| 2 epoch 在所有条件下 AUC 均下降   | 第二 epoch 存在过拟合              |
+| T_max 不随 num_epochs 扩展        | 所有 2-ep 实验的 epoch 2 全程 LR≈0 |
+
+假设：label smoothing（ε=0.05）软化标签后，模型在 epoch 2 不会再过拟合；配合正确的 LR 调度（WarmRestart / T_max=13400），epoch 2 能学到新知识。
+
+### 11.2 实验设计
+
+5 个变体，均为 num_epochs=1 或 2，tmax_6700 + label_smoothing 组合：
+
+| 变体                                      | num_epochs | LR 调度                     | T_max/T_0   |
+| ----------------------------------------- | ---------- | --------------------------- | ----------- |
+| label_smoothing                           | 1          | CosineAnnealing             | T_max=6300  |
+| tmax_6700_label_smoothing                 | 1          | CosineAnnealing             | T_max=6700  |
+| tmax_6700_label_smoothing_warmrestart     | 1          | CosineAnnealingWarmRestarts | T_0=6700    |
+| tmax_6700_label_smoothing_2ep_tmax13400   | 2          | CosineAnnealing             | T_max=13400 |
+| tmax_6700_label_smoothing_warmrestart_2ep | 2          | CosineAnnealingWarmRestarts | T_0=6700    |
+
+### 11.3 原始结果
+
+**1-epoch 变体（model-7757）：**
+
+| 变体                                  | AUC CTR      | BCE CTR  | AUC CVR  | BCE CVR  |
+| ------------------------------------- | ------------ | -------- | -------- | -------- |
+| baseline（历史）                      | 0.716316     | 1.933748 | 0.757583 | 0.493283 |
+| tmax_6700（历史）                     | 0.716737     | 1.932744 | 0.758315 | 0.493119 |
+| label_smoothing                       | 0.716637     | 1.971085 | 0.757055 | 0.517454 |
+| **tmax_6700_label_smoothing**         | **0.716955** | 1.970330 | 0.757264 | 0.517286 |
+| tmax_6700_label_smoothing_warmrestart | 0.712843     | 1.979397 | 0.749150 | 0.521807 |
+
+**2-epoch 变体（model-15515 = 2 × model-7757 步数）：**
+
+| 变体                                      | AUC CTR  | BCE CTR  | AUC CVR  | BCE CVR  |
+| ----------------------------------------- | -------- | -------- | -------- | -------- |
+| tmax_6700_label_smoothing_2ep_tmax13400   | 0.696083 | 2.081405 | 0.741984 | 0.545642 |
+| tmax_6700_label_smoothing_warmrestart_2ep | 0.686365 | 2.185797 | 0.742673 | 0.567813 |
+
+### 11.4 分析
+
+#### 发现 1：Label smoothing 的 BCE 升高是预期的
+
+所有 label_smoothing 变体的 BCE 均比历史 baseline 高约 0.04（1.97 vs 1.93）。**这是 label smoothing 造成的，不是模型退化。** Soft label {0, 1} → {0.025, 0.975} 增加了标签的不确定性，BCE 的"最优可达值"本身就更高。需要关注的是 AUC，不是 BCE 的绝对值。
+
+直接证比：baseline 的 BCE=1.933748，label_smoothing 的 BCE=1.971085（+0.037337），但 AUC 几乎相同（0.716316 vs 0.716637，Δ=+0.000321）。BCE 升高但 AUC 不跌甚至微升 → soft label 没有伤害排序能力。
+
+#### 发现 2：tmax_6700 与 label_smoothing 叠加正向
+
+| 组合                            | ΔAUC CTR vs baseline | ΔAUC CVR vs baseline |
+| ------------------------------- | -------------------- | -------------------- |
+| tmax_6700 alone                 | +0.000421            | +0.000732            |
+| label_smoothing alone           | +0.000321            | -0.000528            |
+| **tmax_6700 + label_smoothing** | **+0.000639**        | -0.000319            |
+
+CTR 上两者正向叠加（+0.000218 增量超过 tmax_6700 单独）。CVR 上 label smoothing 有轻微负向贡献（-0.0002 vs tmax_6700 alone），但不如历史 CVR 波动大（SE≈0.00086 下 ~0.3σ）。
+
+#### 发现 3：WarmRestart 1-epoch AUC 下降（0.712843）是因为 LR 重置时机问题
+
+WarmRestart 的 T_0=6700（warmup_size=1000），实际 LR 重启发生在 step 7700，而 eval 在 step 7757。**此时 LR 刚被重置到 base_lr，模型处于高 LR 不稳定状态即被评估。** 这不是 WarmRestart 的固有问题，而是 eval 时机与 LR 周期不匹配。
+
+#### 发现 4：2-epoch 在所有 LR 调度下均失败
+
+| 条件                        | AUC CTR vs 1-ep            |
+| --------------------------- | -------------------------- |
+| CosineAnnealing T_max=13400 | -0.020872（统计显著，24σ） |
+| WarmRestart T_0=6700        | -0.030578（统计显著，35σ） |
+
+**0.02-0.03 的 AUC 下降在 SE=0.00086 下极为显著。** 2-epoch 在任何条件下都失败，不是 LR 调度的问题。
+
+#### 发现 5：BCE 的 U 型回升确认过拟合
+
+2-epoch 的 BCE 从 1.97 升至 2.08-2.18（远高于 1-epoch 的 1.97），说明 epoch 2 没有学到任何有用信息，反而记住了训练噪声。Label smoothing（ε=0.05）不足以抑制这种记忆效应。
+
+### 11.5 核心结论
+
+**"2-epoch 失败是因为 LR 调度错误"的假设被实验否定。** 无论平滑 decay（T_max=13400）还是周期重启（WarmRestart），2-epoch 都大幅退化。模型在 epoch 2 无法学到新知识。
+
+可能的原因：
+
+1. 模型容量过大（96M item_id 参数 + 数千维统计特征 concat），epoch 2 直接记忆训练噪声
+1. ε=0.05 的 label smoothing 抑制力度不足以在 epoch 2 防止过拟合
+1. 随机 99/1 拆分导致 train 和 val 分布几乎一致 → 1 epoch 已学到极限
+
+### 11.6 当前最优配置
+
+```
+tmax_6700 + label_smoothing (ε=0.05), num_epochs=1
+```
+
+| 指标    | 值           | Δ vs baseline                |
+| ------- | ------------ | ---------------------------- |
+| AUC CTR | **0.716955** | **+0.000639**（历史最优）    |
+| BCE CTR | 1.970330     | +0.036582（soft label 导致） |
+| AUC CVR | 0.757264     | -0.000319                    |
+| BCE CVR | 0.517286     | +0.024003（soft label 导致） |
+
+### 11.7 后续方向
+
+| 方向                                 | 建议                          | 优先级 |
+| ------------------------------------ | ----------------------------- | ------ |
+| **上线 tmax_6700 + label_smoothing** | CTR 历史最优 0.716955         | P0     |
+| Segment 诊断                         | 用 grouped_auc 找薄弱 segment | P1     |
+| 时间拆分验证                         | 确认改进在真实分布上成立      | P1     |
+| 更大 ε 的 label smoothing            | 尝试 0.1/0.2 以允许 2+ epoch  | P2     |
+| 停止 2-epoch 实验                    | 数据充分证明无效              | —      |
