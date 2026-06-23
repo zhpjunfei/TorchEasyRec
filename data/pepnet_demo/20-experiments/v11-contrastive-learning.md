@@ -1127,17 +1127,21 @@ ______________________________________________________________________
 
 所有 label_smoothing 变体的 BCE 均比历史 baseline 高约 0.04（1.97 vs 1.93）。**这是 label smoothing 造成的，不是模型退化。** Soft label {0, 1} → {0.025, 0.975} 增加了标签的不确定性，BCE 的"最优可达值"本身就更高。需要关注的是 AUC，不是 BCE 的绝对值。
 
-直接证比：baseline 的 BCE=1.933748，label_smoothing 的 BCE=1.971085（+0.037337），但 AUC 几乎相同（0.716316 vs 0.716637，Δ=+0.000321）。BCE 升高但 AUC 不跌甚至微升 → soft label 没有伤害排序能力。
+直接证比：baseline 的 BCE=1.933748，label_smoothing 的 BCE=1.971085（+0.037337），但 AUC 几乎相同（0.716316 vs 0.716637，Δ=+0.000321）。BCE 升高但 AUC 不跌甚至微升 → soft label 没有伤害排序能力。**注意：BCE 的绝对差值不能直接解读为"模型变差"，因为 label smoothing 改变了目标分布，最优可达 BCE 本身就更高。**
 
-#### 发现 2：tmax_6700 与 label_smoothing 叠加正向
+#### 发现 2：tmax_6700 与 label_smoothing 在 CTR 上叠加正向，CVR 需要权衡
 
-| 组合                            | ΔAUC CTR vs baseline | ΔAUC CVR vs baseline |
-| ------------------------------- | -------------------- | -------------------- |
-| tmax_6700 alone                 | +0.000421            | +0.000732            |
-| label_smoothing alone           | +0.000321            | -0.000528            |
-| **tmax_6700 + label_smoothing** | **+0.000639**        | -0.000319            |
+tmax_6700 和 label_smoothing 的 CVR 基线不同，需要分开对比：
 
-CTR 上两者正向叠加（+0.000218 增量超过 tmax_6700 单独）。CVR 上 label smoothing 有轻微负向贡献（-0.0002 vs tmax_6700 alone），但不如历史 CVR 波动大（SE≈0.00086 下 ~0.3σ）。
+| 组合 | ΔAUC CTR vs baseline (0.716316) | ΔAUC CVR vs baseline (0.757583) | ΔAUC CVR vs tmax_6700 alone (0.758315) |
+|---|---|---|---|
+| tmax_6700 alone | **+0.000421** | **+0.000732** | — |
+| label_smoothing alone | +0.000321 | -0.000528 | -0.001260 |
+| **tmax_6700 + label_smoothing** | **+0.000639** | -0.000319 | **-0.001051** |
+
+CTR 上两者正向叠加（tmax_6700_label_smoothing 的 +0.000639 > tmax_6700 alone 的 +0.000421）。CVR 上 label_smoothing 引入了一致的负向偏移（约 -0.001），无论是否叠加 tmax_6700。在 AUC SE≈0.00086 下，-0.001 是 ~1.2σ，非决定性但值得关注。**需要权衡 CTR 收益 vs CVR 代价。**
+
+
 
 #### 发现 3：WarmRestart 1-epoch AUC 下降（0.712843）是因为 LR 重置时机问题
 
@@ -1152,9 +1156,11 @@ WarmRestart 的 T_0=6700（warmup_size=1000），实际 LR 重启发生在 step 
 
 **0.02-0.03 的 AUC 下降在 SE=0.00086 下极为显著。** 2-epoch 在任何条件下都失败，不是 LR 调度的问题。
 
-#### 发现 5：BCE 的 U 型回升确认过拟合
+> **重要 caveat**：上述比较仅在两个时间点（step 7757 和 step 15515）进行，未比较中间 checkpoint（step 10000/12000）。不排除 epoch 2 前半段 AUC 先改善再回落的可能。但 step 15515 的 BCE（2.08-2.19）远高于 step 7757（1.97），说明即使中间有峰值，epoch 2 整体的趋势是向下的。
 
-2-epoch 的 BCE 从 1.97 升至 2.08-2.18（远高于 1-epoch 的 1.97），说明 epoch 2 没有学到任何有用信息，反而记住了训练噪声。Label smoothing（ε=0.05）不足以抑制这种记忆效应。
+#### 发现 5：BCE 在 epoch 2 显著回升，模型在遗忘而非学习
+
+2-epoch 的 BCE 从 1.97（step 7757）升至 2.08-2.19（step 15515）。**注意：这不是 U 型回升（没有中间 checkpoints 的 eval 确认走势），但 BCE 在训练更多数据后反而恶化，说明模型在 epoch 2 不仅没有学到新知识，还在遗忘 epoch 1 学到的东西（灾难性遗忘特征）。** Label smoothing（ε=0.05）不足以抑制这种记忆效应。
 
 ### 11.5 核心结论
 
@@ -1165,6 +1171,7 @@ WarmRestart 的 T_0=6700（warmup_size=1000），实际 LR 重启发生在 step 
 1. 模型容量过大（96M item_id 参数 + 数千维统计特征 concat），epoch 2 直接记忆训练噪声
 1. ε=0.05 的 label smoothing 抑制力度不足以在 epoch 2 防止过拟合
 1. 随机 99/1 拆分导致 train 和 val 分布几乎一致 → 1 epoch 已学到极限
+1. **（未验证）中间 checkpoint（step 10000/12000）的 AUC 可能高于两端的 step 7757 和 15515。** 现有数据只有两个时间点，不排除 epoch 2 前半段先改善再回落的可能。需 tensorboard 曲线确认趋势。
 
 ### 11.6 当前最优配置
 
