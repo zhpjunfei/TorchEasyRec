@@ -1134,12 +1134,14 @@ ______________________________________________________________________
 tmax_6700 和 label_smoothing 的 CVR 基线不同，需要分开对比：
 
 | 组合 | ΔAUC CTR vs baseline (0.716316) | ΔAUC CVR vs baseline (0.757583) | ΔAUC CVR vs tmax_6700 alone (0.758315) |
-|---|---|---|---|
-| tmax_6700 alone | **+0.000421** | **+0.000732** | — |
-| label_smoothing alone | +0.000321 | -0.000528 | -0.001260 |
-| **tmax_6700 + label_smoothing** | **+0.000639** | -0.000319 | **-0.001051** |
+|---|---|---|---|---|
+| tmax_6700 alone | **+0.000421 (0.49σ)** | **+0.000732 (0.90σ)** | — |
+| label_smoothing alone | +0.000321 (0.37σ) | -0.000528 (0.65σ) | -0.001260 (1.56σ) |
+| **tmax_6700 + label_smoothing** | **+0.000639 (0.74σ)** | -0.000319 (0.39σ) | **-0.001051 (1.30σ)** |
 
-CTR 上两者正向叠加（tmax_6700_label_smoothing 的 +0.000639 > tmax_6700 alone 的 +0.000421）。CVR 上 label_smoothing 引入了一致的负向偏移（约 -0.001），无论是否叠加 tmax_6700。在 AUC SE≈0.00086 下，-0.001 是 ~1.2σ，非决定性但值得关注。**需要权衡 CTR 收益 vs CVR 代价。**
+> **⚠ 统计显著性警告**：以 AUC SE≈0.00086（CTR）/ 0.00081（CVR）计算，所有 1-epoch 变体的 ΔAUC 均 < 2σ。没有任何一个效果的统计置信度超过常规显著性阈值。所有对比应视为 directionally consistent 而非已证实的改进。
+
+CTR 上两者方向一致地正向叠加（tmax_6700_label_smoothing 的 +0.000639 > tmax_6700 alone 的 +0.000421）。CVR 上 label_smoothing 引入了一致的负向偏移（约 -0.001），但同样不显著。**当前数据不足以独立确认任何单独改进的效果，但趋势一致指向 tmax_6700 + label_smoothing 为最优组合。**
 
 
 
@@ -1147,7 +1149,7 @@ CTR 上两者正向叠加（tmax_6700_label_smoothing 的 +0.000639 > tmax_6700 
 
 WarmRestart 的 T_0=6700（warmup_size=1000），实际 LR 重启发生在 step 7700，而 eval 在 step 7757。**此时 LR 刚被重置到 base_lr，模型处于高 LR 不稳定状态即被评估。** 这不是 WarmRestart 的固有问题，而是 eval 时机与 LR 周期不匹配。
 
-#### 发现 4：2-epoch 在所有 LR 调度下均失败
+#### 发现 4：2-epoch 在所有 LR 调度下均失败（tensorboard 曲线确认）
 
 | 条件                        | AUC CTR vs 1-ep            |
 | --------------------------- | -------------------------- |
@@ -1156,42 +1158,164 @@ WarmRestart 的 T_0=6700（warmup_size=1000），实际 LR 重启发生在 step 
 
 **0.02-0.03 的 AUC 下降在 SE=0.00086 下极为显著。** 2-epoch 在任何条件下都失败，不是 LR 调度的问题。
 
-> **重要 caveat**：上述比较仅在两个时间点（step 7757 和 step 15515）进行，未比较中间 checkpoint（step 10000/12000）。不排除 epoch 2 前半段 AUC 先改善再回落的可能。但 step 15515 的 BCE（2.08-2.19）远高于 step 7757（1.97），说明即使中间有峰值，epoch 2 整体的趋势是向下的。
+> **Tensorboard 曲线确认（2026-06-23）**：两组 2-epoch 实验的 tensorboard 曲线显示了完全一致的过拟合模式：
+> - **Epoch 边界（~8k steps）处存在剧烈 step-change**：eval AUC（蓝色）从 ~0.715 骤降至 ~0.695，train AUC（橙色）从 ~0.71 跳升至 ~0.75。这是经典过拟合 pattern：模型在记忆训练数据中的噪声分布而非通用模式。
+> - **之前关于"中间 checkpoint 可能先改善再回落"的 caveat 已排除**：曲线清楚显示 eval AUC 在 epoch 边界处直接下降，之后基本持平（~0.695-0.71），未出现先升后降的倒 U 形
+> - **⚠ 曲线末端（~step 15k）eval AUC ~0.71 与 step-15515 final eval（0.696）存在 ~0.014 差距**。可能原因：tensorboard 评估使用不同的验证集采样或平滑策略。不影响定性结论——两来源均确认 epoch 2 劣于 epoch 1。
 
-#### 发现 5：BCE 在 epoch 2 显著回升，模型在遗忘而非学习
+#### 发现 5：BCE 在 epoch 2 显著回升，模型过拟合而非遗忘
 
-2-epoch 的 BCE 从 1.97（step 7757）升至 2.08-2.19（step 15515）。**注意：这不是 U 型回升（没有中间 checkpoints 的 eval 确认走势），但 BCE 在训练更多数据后反而恶化，说明模型在 epoch 2 不仅没有学到新知识，还在遗忘 epoch 1 学到的东西（灾难性遗忘特征）。** Label smoothing（ε=0.05）不足以抑制这种记忆效应。
+2-epoch 的 BCE 从 1.97（step 7757）升至 2.08-2.19（step 15515）。Tensorboard 曲线确认了过拟合机制：
+- **训练 BCE** 在 epoch 边界处跳升（从 ~1.88 升至 ~1.90-1.92），但此后持续在较低水平波动
+- **训练 AUC** 从 ~0.71 跳升至 ~0.75 并维持高位
+- **Eval AUC** 从 ~0.715 骤降至 ~0.695 后仅恢复至 ~0.71
+
+**这是过拟合（记忆训练噪声），不是灾难性遗忘。** 二者区别：遗忘意味着所有指标同步恶化（train eval 均下降），过拟合意味着训练指标改善、验证指标恶化。这里 train AUC 上升 / eval AUC 下降的模式与过拟合完全一致。
+
+Label smoothing（ε=0.05）不足以抑制 epoch 2 的过拟合。模型在 epoch 2 学到了数据中的虚假模式而非通用知识。
 
 ### 11.5 核心结论
 
-**"2-epoch 失败是因为 LR 调度错误"的假设被实验否定。** 无论平滑 decay（T_max=13400）还是周期重启（WarmRestart），2-epoch 都大幅退化。模型在 epoch 2 无法学到新知识。
+**"2-epoch 失败是因为 LR 调度错误"的假设被实验否定。** 无论平滑 decay（T_max=13400）还是周期重启（WarmRestart），2-epoch 都大幅退化。Tensorboard 曲线确认了过拟合机制：模型在 epoch 2 学到的是训练数据的噪声分布而非通用模式。
 
-可能的原因：
+**⚠ 关于 1-epoch 改进的统计显著性：** 所有 1-epoch 变体的 CTR/CVR ΔAUC 均 < 1σ（最大 0.90σ），任何单独改进均未达到常规显著性阈值。以下原因分析应视为 hypothesis 而非 confirmed findings。
+
+可能的原因（1-epoch 改进方向一致但未达显著）：
 
 1. 模型容量过大（96M item_id 参数 + 数千维统计特征 concat），epoch 2 直接记忆训练噪声
 1. ε=0.05 的 label smoothing 抑制力度不足以在 epoch 2 防止过拟合
 1. 随机 99/1 拆分导致 train 和 val 分布几乎一致 → 1 epoch 已学到极限
-1. **（未验证）中间 checkpoint（step 10000/12000）的 AUC 可能高于两端的 step 7757 和 15515。** 现有数据只有两个时间点，不排除 epoch 2 前半段先改善再回落的可能。需 tensorboard 曲线确认趋势。
+1. （已排除）中间 checkpoint 先升后降的可能 → tensorboard 曲线显示 eval AUC 在 epoch 边界直接下降
 
-### 11.6 当前最优配置
+### 11.6 当前最优配置（方向性最优，未达统计显著）
 
 ```
 tmax_6700 + label_smoothing (ε=0.05), num_epochs=1
 ```
 
-| 指标    | 值           | Δ vs baseline                |
-| ------- | ------------ | ---------------------------- |
-| AUC CTR | **0.716955** | **+0.000639**（历史最优）    |
-| BCE CTR | 1.970330     | +0.036582（soft label 导致） |
-| AUC CVR | 0.757264     | -0.000319                    |
-| BCE CVR | 0.517286     | +0.024003（soft label 导致） |
+| 指标    | 值           | Δ vs baseline                          |
+| ------- | ------------ | -------------------------------------- |
+| AUC CTR | **0.716955** | **+0.000639 (0.74σ，方向最优，未达显著)** |
+| BCE CTR | 1.970330     | +0.036582（soft label 导致）           |
+| AUC CVR | 0.757264     | -0.000319 (0.39σ，不显著)              |
+| BCE CVR | 0.517286     | +0.024003（soft label 导致）           |
+
+> 所有 1-epoch 变体的改进均未超过 1σ。上表中 "最优" 指所有实验中方向性结果最好，不意味着具有统计显著性。
 
 ### 11.7 后续方向
 
-| 方向                                 | 建议                          | 优先级 |
-| ------------------------------------ | ----------------------------- | ------ |
-| **上线 tmax_6700 + label_smoothing** | CTR 历史最优 0.716955         | P0     |
-| Segment 诊断                         | 用 grouped_auc 找薄弱 segment | P1     |
-| 时间拆分验证                         | 确认改进在真实分布上成立      | P1     |
-| 更大 ε 的 label smoothing            | 尝试 0.1/0.2 以允许 2+ epoch  | P2     |
-| 停止 2-epoch 实验                    | 数据充分证明无效              | —      |
+| 方向                                 | 建议                                                       | 优先级 |
+| ------------------------------------ | ---------------------------------------------------------- | ------ |
+| **上线 tmax_6700 + label_smoothing** | ΔCTR=+0.000639(0.74σ)，方向最优但未达显著，根据业务风险决策 | P0-P1  |
+| Segment 诊断                         | 用 grouped_auc 找薄弱 segment                              | P1     |
+| 时间拆分验证                         | 确认改进在真实分布上成立                                   | P1     |
+| 更大 ε 的 label smoothing            | 尝试 0.1/0.2 以允许 2+ epoch                               | P2     |
+| 停止 2-epoch 实验                    | 数据充分证明无效                                           | —      |
+
+______________________________________________________________________
+
+## 12. 品类跳跃修复（2026-06-23）
+
+### 12.1 问题描述
+
+线上 A/B 测试显示 `home_flow_2604_v11_contrastive.config` 在 uvctr 和人均曝光点击上有正向提升，但存在**品类跳跃**问题：用户点击了大量水果、牛奶、家电，推荐结果中却出现了卫衣、童装等跨品类商品。
+
+### 12.2 根因分析
+
+`title_vector` 被放在了 `feature_group "all"` 中（line 12366），这意味着它：
+
+1. **被嵌入后拼接到主特征向量** → 流入 PEPNet/PLE tower → 直接影响 CTR/CVR 排序分数
+2. **同时被对比学习使用** → 行为向量被拉向 title_vector 的语义空间
+
+title_vector 编码的是**商品文字语义**（来自 Qwen3 文本嵌入），而非品类归属。当它同时作为 PEPNet 的输入特征和对比学习的对齐目标时：
+
+- PEPNet tower 学到"语义相似 = 应该推荐"
+- 跨品类但语义相近的商品（如"舒适透气面料的卫衣" vs "有机健康的食品"）被错误地关联
+- **DIN 编码的品类级偏好被语义级信号污染**
+
+### 12.3 修复方案
+
+**核心思路**：让 `title_vector` 只参与对比学习，不流入 PEPNet tower。
+
+#### Config 变更
+
+```diff
+# 从 feature_group "all" 中移除 title_vector
+- feature_names: "title_vector"
+
+# 新增独立的 "contrastive" feature group
++ feature_groups {
++   group_name: "contrastive"
++   feature_names: "title_vector"
++   group_type: DEEP
++ }
+```
+
+#### 代码变更（`tzrec/models/pepnet_dcn_ple.py`）
+
+```diff
+- # 从 "all" group 中查找 title_vector 的索引
+- self._title_vector_idx = None
+- offset = 0
+- for name, dim in self.embedding_group.group_feature_dims("all").items():
+-     if name == "title_vector":
+-         self._title_vector_idx = (offset, offset + dim)
+-         break
+-     offset += dim
++ # 从独立的 "contrastive" group 中获取 title_vector
++ self._title_vector_dim = None
++ cg = getattr(self.embedding_group, "_group_feature_dims", {})
++ if "contrastive" in cg and "title_vector" in cg["contrastive"]:
++     self._title_vector_dim = cg["contrastive"]["title_vector"]
+```
+
+```diff
+- if behavior_emb is not None and self._title_vector_idx is not None:
++ if behavior_emb is not None and self._title_vector_dim is not None:
+      v = self.contrastive_behavior_proj(behavior_emb)
+-     t_raw = grouped_features[self._main_group_name][
+-         :, self._title_vector_idx[0] : self._title_vector_idx[1]
+-     ]
++     tv_group = grouped_features.get("contrastive")
++     if tv_group is None:
++         return predictions
++     t_raw = tv_group[:, : self._title_vector_dim]
+```
+
+### 12.4 修复后的数据流
+
+```
+baseline (C组):
+  title_vector: 不存在
+  DIN → PEPNet → 排序: 基于品类/价格/品牌等
+
+contrastive (修复后):
+  title_vector: 仅在 "contrastive" group 中
+  DIN → PEPNet → 排序: 基于品类/价格/品牌等（无 title_vector 污染）
+  对比学习: DIN输出 ↔ title_vector（仅用于优化 behavior_proj，不影响排序）
+
+contrastive (修复前):
+  title_vector: 在 "all" group 中
+  DIN → PEPNet → 排序: 品类信号 + 语义信号混合 ← 品类跳跃的根因
+  对比学习: DIN输出 ↔ title_vector
+```
+
+### 12.5 验证计划
+
+| 验证项 | 预期 | 方法 |
+|--------|------|------|
+| uvctr 仍正向 | +0.99% | A/B 测试 |
+| 品类跳跃率下降 | 显著降低 | 统计推荐品类与用户历史品类的差异 |
+| AUC CTR 不降 | ≥ baseline | 离线验证 |
+| CVR 不受影响 | 与 baseline 一致 | 离线+线上验证 |
+| 导出模型一致性 | 与 baseline 结构一致 | 检查 exported model 中无 title_vector 相关层 |
+
+### 12.6 为什么修复后 uvctr 仍能正向？
+
+uvctr 提升的根本原因是**对比学习优化了 behavior_proj**，使 DIN 编码的行为向量更好地对齐商品语义空间。这提升了模型对用户兴趣的理解精度。
+
+修复前，title_vector 同时影响排序和对比学习，导致**排序被语义信号污染**（品类跳跃）。修复后，title_vector 只用于对比学习，DIN 行为向量仍然被优化到更好的语义对齐状态，但**排序不再受语义信号污染**。
+
+类比：
+- 修复前：老师既教知识又改试卷，但改试卷时用了错误的标准 → 成绩好看但知识教歪了
+- 修复后：老师只用来改试卷的标准来评估自己，教学回归正确标准 → 成绩依然好，知识也教对了
