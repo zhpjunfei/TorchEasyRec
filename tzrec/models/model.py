@@ -29,6 +29,7 @@ from tzrec.datasets.data_parser import DataParser
 from tzrec.datasets.utils import Batch
 from tzrec.features.feature import BaseFeature
 from tzrec.loss.pe_mtl_loss import ParetoEfficientMultiTaskLoss
+from tzrec.loss.uncertainty_weight_loss import UncertaintyWeightLoss
 from tzrec.modules.utils import BaseModule
 from tzrec.protos.loss_pb2 import LossConfig
 from tzrec.protos.model_pb2 import FeatureGroupConfig, ModelConfig
@@ -276,6 +277,25 @@ class TrainWrapper(BaseModule):
                 self.model._pareto_init_weight_cs
             )
 
+        self.uncertainty_weight = None
+        self._uw_active = (
+            hasattr(self.model, "_use_uncertainty_weight")
+            and self.model._use_uncertainty_weight
+        )
+        if self._uw_active:
+            num_tasks = len(
+                self.model._task_tower_cfgs
+                if hasattr(self.model, "_task_tower_cfgs")
+                else [1]
+            )
+            self.uncertainty_weight = UncertaintyWeightLoss(num_tasks)
+            print(
+                f"[VERIFY] UncertaintyWeight enabled: {num_tasks} tasks, "
+                f"init_log_vars={self.uncertainty_weight.log_vars.tolist()}",
+                flush=True,
+            )
+        self._uw_first_call = True
+
     def forward(self, batch: Batch) -> TRAIN_FWD_TYPE:
         """Predict and compute loss.
 
@@ -295,7 +315,16 @@ class TrainWrapper(BaseModule):
         ):
             predictions = self.model.predict(batch)
             losses = self.model.loss(predictions, batch)
-            if self.training and self.pareto:
+            if self.training and self.uncertainty_weight:
+                if self._uw_first_call:
+                    print(
+                        "[VERIFY] UncertaintyWeight forward executed! "
+                        f"log_vars={self.uncertainty_weight.log_vars.tolist()}",
+                        flush=True,
+                    )
+                    self._uw_first_call = False
+                total_loss = self.uncertainty_weight(losses)
+            elif self.training and self.pareto:
                 total_loss = self.pareto(losses, self.model)
             else:
                 total_loss = torch.stack(list(losses.values())).sum()

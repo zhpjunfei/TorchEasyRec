@@ -47,6 +47,8 @@ class MultiTaskRank(RankModel):
         if self._use_pareto_loss_weight:
             self._pareto_init_weight_cs = []
 
+        self._use_uncertainty_weight = model_config.use_uncertainty_weight
+
     def _multi_task_output_to_prediction(
         self, output: Dict[str, torch.Tensor]
     ) -> Dict[str, torch.Tensor]:

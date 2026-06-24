@@ -95,4 +95,8 @@ message ModelConfig {
     // whether use pareto loss weight
     optional bool use_pareto_loss_weight = 13 [default = false];
 
+    // whether use uncertainty weight for multi-task loss
+    // (Kendall et al., "Multi-Task Learning Using Uncertainty to Weigh Losses", CVPR 2018)
+    optional bool use_uncertainty_weight = 14 [default = false];
+
 }
