@@ -290,12 +290,12 @@ class PEPNetDCNPLE(MultiTaskRank):
         self.default_behavior = nn.Parameter(torch.zeros(128))
 
         self._title_vector_idx = None
-        offset = 0
-        for name, dim in self.embedding_group.group_feature_dims("all").items():
-            if name == "title_vector":
-                self._title_vector_idx = (offset, offset + dim)
-                break
-            offset += dim
+        self._title_vector_dim = None
+        # title_vector is now in a separate "contrastive" feature group
+        # to prevent it from leaking into the PEPNet tower
+        cg = getattr(self.embedding_group, "_group_feature_dims", {})
+        if "contrastive" in cg and "title_vector" in cg["contrastive"]:
+            self._title_vector_dim = cg["contrastive"]["title_vector"]
 
         self._item_id_num_emb = None
         for f in self._features:
@@ -443,11 +443,14 @@ class PEPNetDCNPLE(MultiTaskRank):
             and self.contrastive_behavior_proj is not None
         ):
             behavior_emb = grouped_features.get("all__seq_output__click_50_seq")
-            if behavior_emb is not None and self._title_vector_idx is not None:
+            if behavior_emb is not None and self._title_vector_dim is not None:
                 v = self.contrastive_behavior_proj(behavior_emb)
-                t_raw = grouped_features[self._main_group_name][
-                    :, self._title_vector_idx[0] : self._title_vector_idx[1]
-                ]
+                # Get title_vector from the "contrastive" feature group
+                # (not from the main "all" group, to prevent PEPNet from using it)
+                tv_group = grouped_features.get("contrastive")
+                if tv_group is None:
+                    return predictions
+                t_raw = tv_group[:, : self._title_vector_dim]
                 seq_len = grouped_features["click_50_seq.sequence_length"]
                 v = torch.where(
                     (seq_len > 0).unsqueeze(1),
