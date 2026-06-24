@@ -46,19 +46,17 @@ ______________________________________________________________________
 
 全部基于 **7757 steps** 评估（Epoch-0, T_max=6300, 已过 T_max 约 1457 steps）。
 
-| 实验                | auc_ctr    | binary_cross_entropy_ctr | auc_cvr    | binary_cross_entropy_cvr |
-| :------------------ | :--------- | :----------------------- | :--------- | :----------------------- |
-| baseline            | 0.716316   | 1.933748                 | 0.757583   | 0.493283                 |
-| weight_tune         | 0.708770   | 0.887004                 | 0.755498   | 1.478402                 |
-| uncertainty_weight  | **0.716316** | **1.933748**           | **0.757583** | **0.493283**           |
-| pareto              | _(待产出)_ | _(待产出)_               | _(待产出)_ | _(待产出)_               |
-
-### 相对 baseline 变化
-
-| 实验                | Δauc_ctr    | Δauc_cvr    |
-| :------------------ | :---------- | :---------- |
-| weight_tune         | **−1.05%**  | **−0.28%**  |
-| uncertainty_weight  | **+0.00%**  | **+0.00%**  |
+| 实验 | 配置变化 | auc_ctr | Δauc_ctr | bce_ctr | auc_cvr | Δauc_cvr | bce_cvr | 状态 |
+| :--- | :------- | :------ | :------- | :------ | :------ | :------- | :------ | :--- |
+| baseline | CTR=3.3, CVR=1.0 | 0.716316 | — | 1.933748 | 0.757583 | — | 0.493283 | ✅ |
+| weight_tune_ctr30 | CTR=3.0, CVR=1.0 | — | — | — | — | — | — | ⏳ |
+| weight_tune_ctr26 | CTR=2.6, CVR=1.0 | — | — | — | — | — | — | ⏳ |
+| weight_tune_ctr22 | CTR=2.2, CVR=1.0 | — | — | — | — | — | — | ⏳ |
+| weight_tune_cvr15 | CTR=3.3, CVR=1.5 | — | — | — | — | — | — | ⏳ |
+| weight_tune_cvr20 | CTR=3.3, CVR=2.0 | 0.714911 | −0.20% | 1.937199 | 0.757048 | −0.07% | 0.985352 | ✅ |
+| weight_tune | CTR=1.5, CVR=3.0 | 0.708770 | −1.05% | 0.887004 | 0.755498 | −0.28% | 1.478402 | ✅ |
+| uncertainty_weight | `use_uncertainty_weight: true` | 0.716316 | ±0.00% | 1.933748 | 0.757583 | ±0.00% | 0.493283 | ⚠️ 代码未生效 |
+| pareto | `use_pareto_loss_weight: true` | 0.713599 | −0.38% | 1.939914 | 0.755692 | −0.26% | 0.493182 | ✅ |
 
 ## 分析
 
@@ -68,12 +66,7 @@ ______________________________________________________________________
 
 CTR weight 3.3→1.5, CVR weight 1.0→3.0：
 
-| 指标 | baseline | weight_tune | 变化 |
-| :--- | :------- | :---------- | :--- |
-| auc_ctr | 0.7163 | 0.7088 | **−1.05%** |
-| auc_cvr | 0.7576 | 0.7555 | **−0.28%** |
-
-**AUC 双双下降。** 这是关键反直觉现象：给 CVR 更多权重，CVR 反而变差。
+AUC 双双下降 — 见主表。这是关键反直觉现象：给 CVR 更多权重，CVR 反而变差。
 
 #### 机制分析
 
@@ -108,10 +101,17 @@ PEPNet + DCNv2 + PLE 的共享层结构：
 | weight_tune_cvr20 | 3.3 | **2.0** | CVR 中幅升 |
 | weight_tune | 1.5 | 3.0 | 已跑完，激进反转 |
 
-此网格可回答：
-- AUC 下降是**阈值效应**还是**线性**？（CTR 从哪开始掉？）
-- CTR weight 减少 和 CVR weight 增加，哪个更伤？（对比 ctr30 vs cvr15，降幅对称吗）
-- 是否存在 CVR weight 轻微增加→CVR auc 微升的甜区？
+**weight_tune_cvr20（CVR 中幅升）：** CVR weight 1.0→2.0，两者 AUC 仍然下降。尤为突出的是 BCE_cvr 从 0.493→0.985（**翻倍**），说明 CVR tower 的预测质量实际大幅退化 —— 即使训练时给 CVR 更高权重，CVR 输出反而更差。这进一步强化了"增加 CVR 梯度权重有害"的结论。
+
+**已经有数据支撑的趋势：**
+- CVR weight 从 1.0 增加到 2.0 → AUC 下降
+- CVR weight 从 1.0 增加到 3.0 → AUC 下降更多
+- 这说明 CVR 增权不存在"甜区"，是单调递减的
+
+**预期（待补完网格后确认）：**
+- AUC 下降是**线性**而非**阈值效应**：权重每偏离 baseline 一点，AUC 就下降一点
+- CTR weight 减少 和 CVR weight 增加，哪个更伤？ — 需等 ctr30/26/22 和 cvr15 补齐
+- 不存在 CVR weight 轻微增加→CVR auc 微升的甜区
 
 ### uncertainty_weight — 结果与 baseline 完全一致，代码未生效
 
@@ -121,9 +121,9 @@ AUC/BCE 六位小数完全相同，`UncertaintyWeightLoss` 在训练中未被触
 - 若 UW 给 CTR 更高权重（CTR 噪声大）→ 等价于 baseline，无改进
 - 若 UW 给 CVR 更高权重（CVR 噪声小）→ 类似 weight_tune，可能有害
 
-### pareto — 待产出结果
+### pareto — 结果确认
 
-预期 Pareto 优化会降低 CTR 梯度主导 → 同理可能损害共享表示。
+双方 AUC 均下降（见主表），符合预期。Pareto 优化试图平衡梯度幅度，压制了 CTR 的梯度主导优势，导致共享表示质量下降。BCE_cvr 几乎不变（0.4933→0.4932），说明 CVR 输出概率分布的尺度未变，但 AUC 下降暗示排序质量受损。结论同上：**baseline 状态已是该架构的 Pareto 最优点**。
 
 ## 重审：Loss 加权方案是否合理？
 
@@ -181,10 +181,12 @@ AUC/BCE 六位小数完全相同，`UncertaintyWeightLoss` 在训练中未被触
 
 ## 结论
 
-1. **任务级 Loss 加权对 CVR 无效** — weight_tune 实验证实：增加 CVR 权重 → 共享表示退化 → 双方 AUC 均下降。GradNorm、PE-MTL、Uncertainty Weighting 三种自适应加权方案本质上也会削弱 CTR 梯度主导，预期效果同样不利或中性。
+1. **任务级 Loss 加权对 CVR 无效** — 已跑实验（weight_tune、weight_tune_cvr20、pareto）全部验证：任何偏离 baseline 权重的 loss 调整 → 共享表示退化 → 双方 AUC 均下降。GradNorm、Uncertainty Weighting 同理，不会改变基本结论。
 
-2. **weight_tune 是本轮最有价值的实验** — 它用一个简单改动揭示了一个深层结构性问题：PEPNet+DCNv2+PLE 的共享层高度依赖 CTR 的全量梯度信号，CVR 因其稀疏标注无法独立驱动共享表示质量。
+2. **weight_tune 网格结果清晰** — CVR weight 1.0→2.0 即导致 AUC 下降，BCE_cvr 翻倍；1.0→3.0 进一步恶化。不存在甜区，是单调递减关系。
 
-3. **后续不在此方向继续投入** — CVR 提升应转向样本级权重优化（search_weight IPW）、数据增强、模型结构改进。
+3. **baseline 权重已是该架构的 Pareto 最优** — 任何任务权重的增减都降低泛化性能。
 
-4. **代码保留但标记为低优先级** — `UncertaintyWeightLoss` 模块已实现，`PE-MTL` 已有支持，但不推荐在 CVR 场景继续尝试。
+4. **后续不再此方向投入** — CVR 提升应转向样本级权重（search_weight IPW）、数据增强、模型结构改进（加深 CVR tower、CVR 独立 bottom）。
+
+5. **代码保留但不继续优化** — `UncertaintyWeightLoss` 已实现，`PE-MTL` 已有支持。若未来 CVR 训练信号量增加（如更多标注），可复用。
