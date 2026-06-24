@@ -93,9 +93,9 @@ class ParetoEfficientMultiTaskLoss(torch.nn.Module):
             grad_flattened = []
             for grad, param in zip(gradients, trainable_params):
                 if grad is not None:
-                    grad_flattened.append(grad.view(-1))
+                    grad_flattened.append(grad.reshape(-1))
                 else:
-                    grad_flattened.append(torch.zeros_like(param).view(-1))
+                    grad_flattened.append(torch.zeros_like(param).reshape(-1))
 
             all_grads = torch.cat(grad_flattened)
             grads.append(all_grads)
