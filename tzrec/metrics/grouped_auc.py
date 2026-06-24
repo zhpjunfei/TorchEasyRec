@@ -12,7 +12,7 @@
 
 import logging
 import os
-from typing import Any
+from typing import Any, Dict, Optional
 
 import torch
 from torch import distributed as dist
@@ -25,13 +25,16 @@ logger = logging.getLogger("tzrec")
 class GroupedAUC(Metric):
     """Grouped AUC."""
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(
+        self, group_name_map: Optional[Dict[int, str]] = None, **kwargs: Any
+    ) -> None:
         super().__init__(sync_on_compute=False, **kwargs)
         self.add_state("preds", default=[], dist_reduce_fx=None)
         self.add_state("target", default=[], dist_reduce_fx=None)
         self.add_state("grouping_key", default=[], dist_reduce_fx=None)
         self._world_size = int(os.environ.get("WORLD_SIZE", 1))
         self._rank = int(os.environ.get("RANK", 0))
+        self._group_name_map = group_name_map or {}
 
     # pyre-ignore [14]
     def update(
@@ -133,17 +136,29 @@ class GroupedAUC(Metric):
             auc_values = [x[1] for x in segment_details]
             worst_by_auc = sorted(segment_details, key=lambda x: x[1])[:10]
             worst_by_samples = sorted(segment_details, key=lambda x: x[3])[:10]
+            if self._group_name_map:
+                worst_by_auc_named = [
+                    (self._group_name_map.get(x[0], str(x[0])), x[1], x[2], x[3])
+                    for x in worst_by_auc
+                ]
+                worst_by_samples_named = [
+                    (self._group_name_map.get(x[0], str(x[0])), x[1], x[2], x[3])
+                    for x in worst_by_samples
+                ]
+            else:
+                worst_by_auc_named = worst_by_auc
+                worst_by_samples_named = worst_by_samples
             logger.info(
                 f"Per-segment AUCs: count={len(segment_details)}, "
                 f"min={min(auc_values):.6f}, max={max(auc_values):.6f}, "
                 f"mean={sum(auc_values) / len(auc_values):.6f}"
             )
             logger.info(
-                f"Bottom-10 by AUC (hash, auc, mean_target, samples): {worst_by_auc}"
+                f"Bottom-10 by AUC (name, auc, mean_target, samples): {worst_by_auc_named}"
             )
             logger.info(
-                f"Bottom-10 by sample count (hash, auc, mean_target, samples): "
-                f"{worst_by_samples}"
+                f"Bottom-10 by sample count (name, auc, mean_target, samples): "
+                f"{worst_by_samples_named}"
             )
 
         sum_gauc = torch.sum(torch.tensor(aucs, device=preds.device))

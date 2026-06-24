@@ -19,6 +19,7 @@ from torch import nn
 from tzrec.constant import TARGET_REPEAT_INTERLEAVE_KEY
 from tzrec.datasets.utils import BASE_DATA_GROUP, Batch
 from tzrec.features.feature import BaseFeature
+from tzrec.features.id_feature import IdFeature
 from tzrec.loss.focal_loss import BinaryFocalLoss
 from tzrec.loss.jrc_loss import JRCLoss
 from tzrec.metrics.decay_auc import DecayAUC
@@ -286,6 +287,15 @@ class RankModel(BaseModel):
         losses.update(self._loss_collection)
         return losses
 
+    def _build_group_name_map(self, feature_name: str) -> Dict[int, str]:
+        for feat in self._features:
+            if feat.name == feature_name and isinstance(feat, IdFeature):
+                if feat.config.vocab_list:
+                    return {i: v for i, v in enumerate(feat.vocab_list)}
+                elif feat.config.vocab_dict:
+                    return {v: k for k, v in feat.vocab_dict.items()}
+        return {}
+
     def _init_metric_impl(
         self, metric_cfg: MetricConfig, num_class: int = 1, suffix: str = ""
     ) -> None:
@@ -321,7 +331,12 @@ class RankModel(BaseModel):
             assert num_class <= 2, (
                 f"num_class must less than 2 when metric type is {metric_type}"
             )
-            self._metric_modules[metric_name] = GroupedAUC()
+            group_name_map = self._build_group_name_map(
+                oneof_metric_cfg.grouping_key
+            )
+            self._metric_modules[metric_name] = GroupedAUC(
+                group_name_map=group_name_map
+            )
         elif metric_type == "xauc":
             self._metric_modules[metric_name] = XAUC(**metric_kwargs)
         elif metric_type == "grouped_xauc":
@@ -393,7 +408,9 @@ class RankModel(BaseModel):
 
         base_sparse_feat = None
         if metric_type in ["grouped_auc", "grouped_xauc"]:
-            base_sparse_feat = batch.sparse_features[BASE_DATA_GROUP].to_dict()
+            base_sparse_feat = {}
+            for kjt in batch.sparse_features.values():
+                base_sparse_feat.update(kjt.to_dict())
 
         if metric_type == "auc":
             pred = (
