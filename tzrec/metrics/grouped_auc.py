@@ -10,6 +10,7 @@
 # limitations under the License.
 
 
+import logging
 import os
 from typing import Any
 
@@ -17,6 +18,8 @@ import torch
 from torch import distributed as dist
 from torchmetrics import Metric
 from torchmetrics.functional.classification.auroc import _binary_auroc_compute
+
+logger = logging.getLogger("tzrec")
 
 
 class GroupedAUC(Metric):
@@ -103,17 +106,46 @@ class GroupedAUC(Metric):
         sorted_preds = preds[indices]
         sorted_target = target[indices]
 
-        _, counts = torch.unique_consecutive(sorted_grouping_key, return_counts=True)
+        unique_group_values, counts = torch.unique_consecutive(
+            sorted_grouping_key, return_counts=True
+        )
         counts = counts.tolist()
+        unique_group_values_list = unique_group_values.tolist()
 
         grouped_preds = torch.split(sorted_preds, counts)
         grouped_target = torch.split(sorted_target, counts)
 
         aucs = []
-        for preds, target in zip(grouped_preds, grouped_target):
-            mean_target = torch.mean(target.to(torch.float32)).item()
+        segment_details = []
+        for group_val, g_preds, g_target in zip(
+            unique_group_values_list, grouped_preds, grouped_target
+        ):
+            mean_target = torch.mean(g_target.to(torch.float32)).item()
             if mean_target > 0 and mean_target < 1:
-                aucs.append(_binary_auroc_compute((preds, target), None))
+                auc = _binary_auroc_compute((g_preds, g_target), None)
+                auc_item = auc.item() if isinstance(auc, torch.Tensor) else auc
+                aucs.append(auc)
+                segment_details.append(
+                    (group_val, auc_item, mean_target, g_preds.size(0))
+                )
+
+        if segment_details and (not dist.is_initialized() or self._rank == 0):
+            auc_values = [x[1] for x in segment_details]
+            worst_by_auc = sorted(segment_details, key=lambda x: x[1])[:10]
+            worst_by_samples = sorted(segment_details, key=lambda x: x[3])[:10]
+            logger.info(
+                f"Per-segment AUCs: count={len(segment_details)}, "
+                f"min={min(auc_values):.6f}, max={max(auc_values):.6f}, "
+                f"mean={sum(auc_values) / len(auc_values):.6f}"
+            )
+            logger.info(
+                f"Bottom-10 by AUC (hash, auc, mean_target, samples): {worst_by_auc}"
+            )
+            logger.info(
+                f"Bottom-10 by sample count (hash, auc, mean_target, samples): "
+                f"{worst_by_samples}"
+            )
+
         sum_gauc = torch.sum(torch.tensor(aucs, device=preds.device))
         group_cnt = torch.tensor(len(aucs), device=preds.device)
 

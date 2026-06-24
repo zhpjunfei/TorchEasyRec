@@ -292,7 +292,10 @@ class RankModel(BaseModel):
         metric_type = metric_cfg.WhichOneof("metric")
         oneof_metric_cfg = getattr(metric_cfg, metric_type)
         metric_kwargs = config_to_kwargs(oneof_metric_cfg)
-        metric_name = metric_type + suffix
+        if metric_type in ("grouped_auc", "grouped_xauc"):
+            metric_name = metric_type + "_" + oneof_metric_cfg.grouping_key + suffix
+        else:
+            metric_name = metric_type + suffix
         if metric_type == "auc":
             assert num_class <= 2, (
                 f"num_class must less than 2 when metric type is {metric_type}"
@@ -383,7 +386,10 @@ class RankModel(BaseModel):
     ) -> None:
         metric_type = metric_cfg.WhichOneof("metric")
         oneof_metric_cfg = getattr(metric_cfg, metric_type)
-        metric_name = metric_type + suffix
+        if metric_type in ("grouped_auc", "grouped_xauc"):
+            metric_name = metric_type + "_" + oneof_metric_cfg.grouping_key + suffix
+        else:
+            metric_name = metric_type + suffix
 
         base_sparse_feat = None
         if metric_type in ["grouped_auc", "grouped_xauc"]:
