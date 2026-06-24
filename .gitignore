@@ -32,6 +32,9 @@ MANIFEST
 .vscode/
 .qoder/
 .claude/
+.agents/
+.codex/
+.obsidian/
 
 # Proto
 protoc*
