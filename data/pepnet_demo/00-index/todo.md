@@ -38,11 +38,11 @@
 文档的证明依赖于 `title_vector` 作为 raw_feature 直接输入的对照实验（0.71574 vs 0.71572）。但这个实验只证明了 **"未经任何处理的静态 title_vector 无预测力"**，没有排除以下可能性：
 
 1. **title_vector 经过可学习投影后可能有预测力**。文档在 Phase 2 中设计了 `contrastive_title_adapter`（Linear(128→64→128) + zero init），但没有跑完就被回退了。如果让这个 adapter 被 BCE 梯度直接优化（而非仅通过对比学习间接优化），可能发现 title_vector 中确实存在微弱信号。
-    
+
 2. **title_vector 可能在特定 segment 中有预测力**。新增的 segment_diag config 引入了 `grouped_auc` 按 lifecycle_tags 和 first_cate_id 分组。如果 title_vector 只在某些品类或用户生命周期段中有价值，全局 AUC 会掩盖这种局部增益。
-    
+
 3. **title_vector 与序列 title_vector 的交互可能有用**。SQL 管道生成了 `click_50_seq__title_vector`（用户历史浏览商品的标题向量序列），但目前没有任何实验使用它。如果将序列 title 的均值/注意力加权作为"用户语义偏好"，与 target title_vector 做对比，可能比用 DIN 输出做对比更有意义。
-    
+
 
 #### 商榷点 2：BCE 下降但 AUC 不升的机制分析不完整
 
@@ -309,7 +309,7 @@ home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3_tae.sql
 | ctr54 | `v12/home_flow_2604_v12_ctr54.config` | ⏳ 已创建未跑 |
 | ctr57 | `v12/home_flow_2604_v12_ctr57.config` | ⏳ 已创建未跑 |
 | ctr60 | `v12/home_flow_2604_v12_ctr60.config` | ⏳ 已创建未跑 |
-| PCGrad (baseline weights) | `v13/home_flow_2604_v13_pcgrad.config` | 🔨 已创建未跑 |
-| PCGrad + ctr45 | `v13/home_flow_2604_v13_pcgrad_ctr45.config` | 🔨 已创建未跑 |
-| CVR 独立 LR | 待创建配置 | 🔨 待开发 |
-| Focal Loss for CVR | 待实现 + v13 配置 | 🔨 待开发 |
+| PCGrad (baseline weights) | `v13/home_flow_2604_v13_pcgrad.config` | ❌ 跳过（PCGrad 在梯度不平衡下失能） |
+| PCGrad + ctr45 | `v13/home_flow_2604_v13_pcgrad_ctr45.config` | ✅ 已跑，无额外收益 |
+| CVR 独立 LR | 待创建配置 | 🔨 待评估 |
+| Focal Loss for CVR | 待实现 + v13 配置 | 🔨 待评估 |
