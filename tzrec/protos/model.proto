@@ -99,4 +99,8 @@ message ModelConfig {
     // (Kendall et al., "Multi-Task Learning Using Uncertainty to Weigh Losses", CVPR 2018)
     optional bool use_uncertainty_weight = 14 [default = false];
 
+    // whether use PCGrad (gradient surgery) for multi-task learning
+    // (Yu et al., "Gradient Surgery for Multi-Task Learning", NeurIPS 2020)
+    optional bool use_pcgrad = 15 [default = false];
+
 }

@@ -268,3 +268,48 @@ home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3_tae.sql
 |P2|验证 2-epoch 失败的真实原因（LR 曲线分析）|0.5 day|已有日志|
 |P3|探索序列 title_vector 对比（替代 DIN-title 对比）|3 days|特征工程|
 |P3|尝试更大 ε 的 label smoothing（0.1/0.2）|1 day|训练集群|
+
+---
+
+## 七、v12 Loss 优化实验 — 核心结论与后续计划
+
+### 7.1 实验结论汇总
+
+| 实验系列 | 方向 | 结果 | 结论 |
+| :------- | :--- | :--- | :--- |
+| CVR weight 增 | 1.0→1.5→2.0→3.0 | AUC 单调递减 | ❌ CVR 加权有害 |
+| CTR weight 降 | 3.3→3.0→2.6→2.2 | AUC 几乎不变 (<0.06%) | ➖ CTR 在[2.2,3.6]是平坦区 |
+| CTR weight 增 | 3.3→3.6→4.0→**4.5** | **+0.10%/+0.04%** | ⬆️ 全网唯一双正方向 |
+| Uncertainty W. | 自适应 | -0.54%/-0.09% | ❌ 有害，压了 CTR 梯度 |
+| PE-MTL | Pareto 平衡 | -0.38%/-0.26% | ❌ 有害，同理 |
+
+### 7.2 核心洞察
+
+- **CVR 提升瓶颈在训练信号量（~5% 标注），不在 loss 加权**
+- 给 CVR 加权 → 共享层被稀疏噪声"污染" → 双方 AUC 降
+- 给 CTR 提权 → 共享层质量更好 → CVR 间接受益
+- **ctr45 是唯一正向信号**，但幅度 <0.1%，需验证 4.5 以上是否存在拐点
+
+### 7.3 后续优化方向（v13）
+
+| 优先级 | 方案 | 机制 | 与 loss 加权的区别 |
+| :----- | :--- | :--- | :---------------- |
+| **P0** | **P**CGrad (梯度投影) | 在梯度层面移除 CVR 与 CTR 的冲突分量 | 不改变 loss 权重，直接防冲突 |
+| **P1** | **CVR 独立 LR** | CVR tower lr=0.003~0.005 vs 共享层 0.001 | 改变 CVR 学习速度而非幅度 |
+| **P1** | **Focal Loss for CVR** | 压低 easy negative，聚焦 hard positive | 改变梯度质量而非幅度 |
+| **P2** | **CTCVR 辅助任务** | 第三 tower，梯度信号量 = 100% 样本 | 增加信号量而非幅度 |
+| **P2** | **继续 CTR↗ 探索** | ctr48/51/54/57/60 已投递 | 确认拐点 |
+
+### 7.4 待跑实验清单
+
+| 实验 | Config | 状态 |
+| :--- | :----- | :--- |
+| ctr48 | `v12/home_flow_2604_v12_ctr48.config` | ⏳ 已创建未跑 |
+| ctr51 | `v12/home_flow_2604_v12_ctr51.config` | ⏳ 已创建未跑 |
+| ctr54 | `v12/home_flow_2604_v12_ctr54.config` | ⏳ 已创建未跑 |
+| ctr57 | `v12/home_flow_2604_v12_ctr57.config` | ⏳ 已创建未跑 |
+| ctr60 | `v12/home_flow_2604_v12_ctr60.config` | ⏳ 已创建未跑 |
+| PCGrad (baseline weights) | `v13/home_flow_2604_v13_pcgrad.config` | 🔨 已创建未跑 |
+| PCGrad + ctr45 | `v13/home_flow_2604_v13_pcgrad_ctr45.config` | 🔨 已创建未跑 |
+| CVR 独立 LR | 待创建配置 | 🔨 待开发 |
+| Focal Loss for CVR | 待实现 + v13 配置 | 🔨 待开发 |

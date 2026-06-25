@@ -49,6 +49,8 @@ class MultiTaskRank(RankModel):
 
         self._use_uncertainty_weight = model_config.use_uncertainty_weight
 
+        self._use_pcgrad = model_config.use_pcgrad
+
     def _multi_task_output_to_prediction(
         self, output: Dict[str, torch.Tensor]
     ) -> Dict[str, torch.Tensor]:

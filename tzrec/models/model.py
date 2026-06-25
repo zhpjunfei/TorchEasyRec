@@ -28,6 +28,7 @@ from tzrec.constant import TARGET_REPEAT_INTERLEAVE_KEY
 from tzrec.datasets.data_parser import DataParser
 from tzrec.datasets.utils import Batch
 from tzrec.features.feature import BaseFeature
+from tzrec.loss.pcgrad_loss import PCGradLoss
 from tzrec.loss.pe_mtl_loss import ParetoEfficientMultiTaskLoss
 from tzrec.loss.uncertainty_weight_loss import UncertaintyWeightLoss
 from tzrec.modules.utils import BaseModule
@@ -294,6 +295,13 @@ class TrainWrapper(BaseModule):
                 f"init_log_vars={self.uncertainty_weight.log_vars.tolist()}",
                 flush=True,
             )
+        self.pcgrad = None
+        if (
+            hasattr(self.model, "_use_pcgrad")
+            and self.model._use_pcgrad
+        ):
+            self.pcgrad = PCGradLoss()
+
         self._uw_first_call = True
 
     def forward(self, batch: Batch) -> TRAIN_FWD_TYPE:
@@ -315,7 +323,9 @@ class TrainWrapper(BaseModule):
         ):
             predictions = self.model.predict(batch)
             losses = self.model.loss(predictions, batch)
-            if self.training and self.uncertainty_weight:
+            if self.training and self.pcgrad:
+                total_loss = self.pcgrad(losses, self.model)
+            elif self.training and self.uncertainty_weight:
                 if self._uw_first_call:
                     print(
                         "[VERIFY] UncertaintyWeight forward executed! "
