@@ -154,12 +154,35 @@ class GroupedAUC(Metric):
                 f"mean={sum(auc_values) / len(auc_values):.6f}"
             )
             logger.info(
-                f"Bottom-10 by AUC (name, auc, mean_target, samples): {worst_by_auc_named}"
+                "Bottom-10 by AUC (name, auc, mean_target, samples): "
+                f"{worst_by_auc_named}"
             )
             logger.info(
                 f"Bottom-10 by sample count (name, auc, mean_target, samples): "
                 f"{worst_by_samples_named}"
             )
+        if dist.is_initialized() and self._world_size > 1:
+            gathered = [None] * self._world_size
+            dist.all_gather_object(gathered, segment_details)
+            if self._rank == 0:
+                all_segments = []
+                seen_ids = set()
+                for rank_segments in gathered:
+                    for s in rank_segments:
+                        gid = s[0]
+                        if gid not in seen_ids:
+                            seen_ids.add(gid)
+                            name = (
+                                self._group_name_map.get(gid, str(gid))
+                                if self._group_name_map
+                                else str(gid)
+                            )
+                            all_segments.append((name, s[1], s[2], s[3], gid))
+                all_segments.sort(key=lambda x: x[1])
+                logger.info(
+                    f"All-ranks segments (name, auc, mean_target, samples, group_id): "
+                    f"{all_segments}"
+                )
 
         sum_gauc = torch.sum(torch.tensor(aucs, device=preds.device))
         group_cnt = torch.tensor(len(aucs), device=preds.device)

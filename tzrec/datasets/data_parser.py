@@ -347,12 +347,45 @@ class DataParser:
             for k, v in input_data.items()
             if k in self.feature_input_names
         }
+        auto_populated_feats = set()
+        for feature in self._features:
+            if feature.stub_type:
+                continue
+            for input_name in feature.inputs:
+                if input_name not in input_data_fg:
+                    feat_side = feature.side_inputs
+                    if not feat_side:
+                        continue
+                    for other in self._features:
+                        if other is feature or other.stub_type:
+                            continue
+                        if feat_side == other.side_inputs:
+                            for other_inp in other.inputs:
+                                if other_inp in input_data_fg:
+                                    input_data_fg[input_name] = input_data_fg[other_inp]
+                                    auto_populated_feats.add(feature.name)
+                                    break
+                            break
+        bypass_feats = {}
+        for feat_name, arr in input_data_fg.items():
+            feat = next((f for f in self._features if f.name == feat_name), None)
+            if feat is None or feat.stub_type:
+                continue
+            if not hasattr(feat.config, "vocab_list") or len(feat.vocab_list) == 0:
+                continue
+            if isinstance(arr.type, pa.ListType) and pa.types.is_string(
+                arr.type.value_type
+            ):
+                bypass_feats[feat_name] = arr
+
         fg_output, status = self._fg_handler.process_arrow(input_data_fg)
         assert status.ok(), status.message()
         for feature in self._features:
             if feature.stub_type:
                 continue
             feat_name = feature.name
+            if feat_name in bypass_feats:
+                continue
             feat_data = fg_output[self._to_pyfg_feat_name(feat_name)]
             if feature.is_sequence:
                 if feature.is_sparse:
@@ -398,6 +431,25 @@ class DataParser:
                             ((0, max_batch_size - len(dense_values)), (0, 0)),
                         )
                     output_data[f"{feat_name}.values"] = _to_tensor(dense_values)
+
+        for feat_name, arr in bypass_feats.items():
+            feat = next(f for f in self._features if f.name == feat_name)
+            str_to_idx = {v: i for i, v in enumerate(feat.vocab_list)}
+            all_values = []
+            all_lengths = []
+            for i in range(len(arr)):
+                pylist = arr[i].as_py()
+                if pylist:
+                    all_values.extend(str_to_idx.get(v, 1) for v in pylist)
+                    all_lengths.append(len(pylist))
+                else:
+                    all_lengths.append(0)
+            output_data[f"{feat_name}.values"] = _to_tensor(
+                np.array(all_values, dtype=np.int64)
+            )
+            output_data[f"{feat_name}.lengths"] = _to_tensor(
+                np.array(all_lengths, dtype=np.int32)
+            )
 
     def to_batch(
         self, input_data: Dict[str, torch.Tensor], force_no_tile: bool = False
