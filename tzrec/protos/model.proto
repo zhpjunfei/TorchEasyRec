@@ -103,4 +103,11 @@ message ModelConfig {
     // (Yu et al., "Gradient Surgery for Multi-Task Learning", NeurIPS 2020)
     optional bool use_pcgrad = 15 [default = false];
 
+    // whether use CTCVR auxiliary loss (ESMM-style)
+    // adds BCE(probs_ctr * probs_cvr, is_click & is_conversion) to total loss
+    optional bool use_ctcvr_loss = 16 [default = false];
+
+    // weight for the CTCVR auxiliary loss term
+    optional float ctcvr_loss_weight = 17 [default = 1.0];
+
 }

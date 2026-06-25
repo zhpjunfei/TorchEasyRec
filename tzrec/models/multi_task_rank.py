@@ -51,6 +51,9 @@ class MultiTaskRank(RankModel):
 
         self._use_pcgrad = model_config.use_pcgrad
 
+        self._use_ctcvr_loss = model_config.use_ctcvr_loss
+        self._ctcvr_loss_weight = model_config.ctcvr_loss_weight
+
     def _multi_task_output_to_prediction(
         self, output: Dict[str, torch.Tensor]
     ) -> Dict[str, torch.Tensor]:
@@ -142,6 +145,23 @@ class MultiTaskRank(RankModel):
                         suffix=f"_{tower_name}",
                     )
                 )
+
+        if self._use_ctcvr_loss:
+            ctr_probs = predictions.get("probs_ctr")
+            cvr_probs = predictions.get("probs_cvr")
+            ctr_label = batch.labels.get("is_click")
+            cvr_label = batch.labels.get("is_conversion")
+            if ctr_probs is not None and cvr_probs is not None:
+                ctcvr_probs = ctr_probs * cvr_probs
+                ctcvr_label = ctr_label * cvr_label
+                bce = -(
+                    ctcvr_label * torch.log(ctcvr_probs.clamp(min=1e-7))
+                    + (1.0 - ctcvr_label) * torch.log((1.0 - ctcvr_probs).clamp(min=1e-7))
+                )
+                losses["binary_cross_entropy_ctcvr"] = (
+                    bce.mean() * self._ctcvr_loss_weight
+                )
+
         losses.update(self._loss_collection)
         return losses
 
