@@ -105,20 +105,21 @@ ______________________________________________________________________
 
 ### Phase 2（当前，1 轮实验）
 
-| 序号 | 实验                            | 内容                                               | 目的                             | 优先级 |
-| :--: | :------------------------------ | :------------------------------------------------- | :------------------------------- | :----: |
-|  1   | **ots002_uv**                   | ots002 + grouped_auc { grouping_key: "mmb_id" }    | uv 级指标验证（user-level GAUC） | **P0** |
-|  2   | **dropout03_uv**                | dropout03 + grouped_auc { grouping_key: "mmb_id" } | uv 级指标验证（user-level GAUC） | **P0** |
-|  3   | **dropout04** (ots=0.02, d=0.4) | 在最优 ots 下验证 dropout 越高越好趋势             | dropout 上限探索                 | **P1** |
-|  4   | **ots002_ctr54_uv**             | ots002 + CTR w=5.4 + mmb_id GAUC                   | 两机制独立叠加 + uv 验证         | **P1** |
+| 序号 | 实验                                   | 内容                                               | 目的                             | 优先级 |
+| :--: | :------------------------------------- | :------------------------------------------------- | :------------------------------- | :----: |
+|  1   | **ots002_uv**                          | ots002 + grouped_auc { grouping_key: "mmb_id" }    | uv 级指标验证（user-level GAUC） | **P0** |
+|  2   | **dropout03_uv**                       | dropout03 + grouped_auc { grouping_key: "mmb_id" } | uv 级指标验证（user-level GAUC） | **P0** |
+|  3   | **ots002_dropout03** (ots=0.02, d=0.3) | 两最优参数组合（ots=0.02 × d=0.3）                 | 探索组合效应                     | **P0** |
+|  4   | **ots002_dropout03_uv**                | 组合 + mmb_id GAUC                                 | uv 级指标验证                    | **P0** |
+|  5   | **ots002_ctr54_uv**                    | ots002 + CTR w=5.4 + mmb_id GAUC                   | 两机制独立叠加 + uv 验证         | **P1** |
 
 ### Phase 3（参数精调）
 
 | 序号 | 实验                | 内容                                  | 目的                       | 优先级 |
 | :--: | :------------------ | :------------------------------------ | :------------------------- | :----: |
-|  5   | ots 更细扫描        | 0.015/0.025（基于 ots002 邻域）       | 精确最优 ots 值            |   P1   |
-|  6   | dropout+ots 网格    | d=0.2/0.4/0.5 × ots=0.02/0.03         | 探索交互面最优组合         |   P2   |
-|  7   | CTR weight 上限验证 | 5.4–6.0 在 user-level metric 下的表现 | 确认 CTR weight 的安全边界 |   P2   |
+|  6   | ots 更细扫描        | 0.015/0.025（基于 ots002 邻域）       | 精确最优 ots 值            |   P1   |
+|  7   | dropout+ots 网格    | d=0.2/0.4/0.5 × ots=0.02/0.03         | 探索交互面最优组合         |   P2   |
+|  8   | CTR weight 上限验证 | 5.4–6.0 在 user-level metric 下的表现 | 确认 CTR weight 的安全边界 |   P2   |
 
 ### Phase 4（长期）
 
@@ -133,12 +134,13 @@ ______________________________________________________________________
 ## 四、实验提交顺序建议
 
 ```
-Round 1（当前）: ots002_uv → dropout03_uv → dropout04    # uv 验证 + 探索
-Round 2:          ots002_ctr54_uv → ots015 → ots025       # 叠加实验 + 细扫描
+Round 1（当前）: ots002_uv → dropout03_uv → ots002_dropout03 → ots002_dropout03_uv
+Round 2:          ots002_ctr54_uv → ots015 → ots025
 ```
 
 **Round 1 优先级最高（ots005 已跑完，结果 +0.50%）：**
 
 1. **ots002_uv** — 最优 CVR config（+0.57%）的 user-level GAUC 安全性验证
 1. **dropout03_uv** — 次优 config（+0.41%）的 user-level GAUC 安全性验证
-1. **dropout04** (ots=0.02, d=0.4) — 验证 dropout 越高越好趋势，探索上限
+1. **ots002_dropout03** — 两最优参数组合：ots=0.02 × d=0.3，预期 > +0.57%
+1. **ots002_dropout03_uv** — 组合 + uv 验证
