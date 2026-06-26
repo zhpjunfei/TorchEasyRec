@@ -292,16 +292,31 @@ ______________________________________________________________________
 1. **代码修复仍未测试。** dropout 在 CVR tower 上的潜在增益待验证。
 1. 详见 `20-experiments/v14-experiments.md`。
 
-### 7.3 更新路线图
+### 7.3 更新路线图（2026-06-26 dropout 修复验证后）
 
 详见 `20-experiments/v14-optimization-plan.md`。当前优先级：
 
-| 优先级 | Round | 实验                          | 内容                                     |
-| :----- | :---: | :---------------------------- | :--------------------------------------- |
-| **P0** |   1   | **Config C 复现**             | 确认 +0.43% CVR 可复现                   |
-| **P0** |   1   | **C + dropout 修复叠加**      | 修好的 LHUC_PPNet + out_task_space       |
-| **P0** |   1   | **加入 user-level metrics**   | grouped_auc + uv 级评估，避免 ctr45 覆辙 |
-| P1     |   2   | out_task_space 参数扫描       | 0.005/0.02/0.05                          |
-| P1     |   2   | C × CTR weight 5.4 叠加       | 机制互补                                 |
-| P2     |   3   | 修复后单独验证 dropout on CVR | 确认 baseline 增益                       |
-| P3     |   4   | 特征工程 / 独立模型           | 长期方向                                 |
+| 优先级 | Round | 实验                        | 内容                                             |
+| :----- | :---: | :-------------------------- | :----------------------------------------------- |
+| **P0** |   1   | **Config C dropout0**       | out_task_space=0.01 + CVR dropout=0，恢复 +0.43% |
+| **P0** |   1   | **C + user-level metrics**  | grouped_auc + uv 级评估，避免 ctr45 覆辙         |
+| **P1** |   1   | **C × CTR weight 5.4 叠加** | 两机制独立，可叠加                               |
+| P1     |   2   | out_task_space 参数扫描     | 0.005/0.02/0.05（CVR dropout=0）                 |
+| P3     |   —   | ~~C + dropout 叠加~~        | ❌ 已证伪，out_task_space 与 dropout 互斥        |
+
+### 7.4 修复后重跑结果（2026-06-26）
+
+**核心发现：out_task_space_weight 与 dropout 在 CVR tower 上互斥。**
+
+| Config                   | 修复前（dropout=0） | 修复后（real dropout） | Δcvr 变化 |
+| :----------------------- | :-----------------: | :--------------------: | :-------: |
+| Config C (out_task=0.01) |    **+0.43%** ⭐    |     **+0.18%** ➖      |  −0.25%   |
+| Config A ([256,128])     |      −0.14% ❌      |       +0.08% ➖        |  +0.22%   |
+| Config D (A+wd)          |      −0.09% ❌      |       +0.09% ➖        |  +0.18%   |
+| Config B (dropout=0.3)   |  +0.04%（未生效）   |     **−0.10%** ❌      |  −0.14%   |
+
+**关键结论：**
+
+1. Config C 修复后 AUC 从 0.760824 降至 0.758937（+0.43% → +0.18%），dropout=0.1 消耗了 out_task_space 所需容量
+1. `config_c_dropout0` 已创建（CVR dropout=0），意图恢复 +0.43%，待跑
+1. Config B 证伪：全容量 CVR tower 不需要 dropout
