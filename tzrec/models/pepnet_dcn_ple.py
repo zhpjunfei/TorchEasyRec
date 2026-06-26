@@ -236,7 +236,11 @@ class PEPNetDCNPLE(MultiTaskRank):
             tower_kwargs = config_to_kwargs(tower_cfg)
             mlp_cfg = tower_kwargs.get("mlp", {"hidden_units": [256, 128, 64]})
             hidden_units = list(mlp_cfg.get("hidden_units", [256, 128, 64]))
-            dropout_ratio = float(mlp_cfg.get("dropout_ratio", 0.0))
+            dropout_ratio = mlp_cfg.get("dropout_ratio", [0.0])
+            if isinstance(dropout_ratio, (list, tuple)):
+                dropout_ratio = float(dropout_ratio[0]) if dropout_ratio else 0.0
+            else:
+                dropout_ratio = float(dropout_ratio)
             self._task_towers.append(
                 LHUC_PPNet(
                     input_dim=task_output_dims[tower_idx],

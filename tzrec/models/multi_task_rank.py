@@ -109,6 +109,9 @@ class MultiTaskRank(RankModel):
         for task_tower_cfg in self._task_tower_cfgs:
             tower_name = task_tower_cfg.tower_name
             label_name = task_tower_cfg.label_name
+            # ESMM mode: CVR tower trained only via CTCVR loss, skip its BCE
+            if self._use_ctcvr_loss and label_name == "is_conversion":
+                continue
             if self.has_weight(task_tower_cfg):
                 if task_tower_cfg.sample_weight_name:
                     sample_weight = task_tower_cfg.sample_weight_name
@@ -156,7 +159,8 @@ class MultiTaskRank(RankModel):
                 ctcvr_label = ctr_label * cvr_label
                 bce = -(
                     ctcvr_label * torch.log(ctcvr_probs.clamp(min=1e-7))
-                    + (1.0 - ctcvr_label) * torch.log((1.0 - ctcvr_probs).clamp(min=1e-7))
+                    + (1.0 - ctcvr_label)
+                    * torch.log((1.0 - ctcvr_probs).clamp(min=1e-7))
                 )
                 losses["binary_cross_entropy_ctcvr"] = (
                     bce.mean() * self._ctcvr_loss_weight
