@@ -1,3 +1,7 @@
+______________________________________________________________________
+
+## date: 2026-06-25 tags: [experiment, v14, roadmap] status: draft related: ["[[v14-experiments]]", "[[../10-architecture/pepnet-dcn-ple]]"]
+
 # v14+ 优化方案与路线图
 
 > 基于 v12–v14 共 24+ 实验 + ctr45 线上 A/B 结果 + LHUC_PPNet dropout 漏洞修复

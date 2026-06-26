@@ -1,3 +1,7 @@
+______________________________________________________________________
+
+## date: 2026-06-25 tags: [experiment, v14, out-task-space-weight] status: completed related: ["[[v13-experiments]]", "[[v14-optimization-plan]]"]
+
 # v14 实验分析：out_task_space_weight 突破 + 正则化方向验证
 
 - 提交时间：2026-06-25

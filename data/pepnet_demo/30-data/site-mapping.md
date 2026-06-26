@@ -8,7 +8,7 @@ ______________________________________________________________________
 
 ## 站点编码 → 站点名映射
 
-完整 350 个 site_id → sitename 映射见 `99-archive/site_mapping.md` (老文件, 保留供追溯).
+完整 350 个 site_id → sitename 映射见 `99-archive/site-mapping-archive.md` (老文件, 保留供追溯).
 
 ## Site 分布
 

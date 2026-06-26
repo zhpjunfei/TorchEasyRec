@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-06-26 tags: [data, index] status: active related: ["[[sample-v1-60d]]", "[[sample-v2-7d]]", "[[sample-v3-pipeline]]"]
+## date: 2026-06-26 tags: [data, index] status: active related: \["\[[sample-v1-60d]\]", "\[[sample-v2-7d]\]", "\[[sample-v3-pipeline]\]"\]
 
 # 30-data — 数据 / SQL
 
@@ -8,13 +8,13 @@ ______________________________________________________________________
 
 ## 笔记列表
 
-| 文件 | 说明 | 状态 |
-| :--- | :--- | :---: |
-| [[sample-v1-60d]] | 60 天样本集 (线上 base 使用) | active |
-| [[sample-v2-7d]] | 7 天样本集 (v6+ 实验使用) | active |
-| [[sample-v3-pipeline]] | sample_v3 特征工程全流程: SQL → FG → EasyRec | active |
-| [[site-mapping]] | site/level 分布分析 | active |
-| [[sql-attribution-30d-vs-24h]] | 标签归因窗口 30d vs 24h 关键差异 ⭐ | active |
+| 文件                             | 说明                                         |  状态  |
+| :------------------------------- | :------------------------------------------- | :----: |
+| \[[sample-v1-60d]\]              | 60 天样本集 (线上 base 使用)                 | active |
+| \[[sample-v2-7d]\]               | 7 天样本集 (v6+ 实验使用)                    | active |
+| \[[sample-v3-pipeline]\]         | sample_v3 特征工程全流程: SQL → FG → EasyRec | active |
+| \[[site-mapping]\]               | site/level 分布分析                          | active |
+| \[[sql-attribution-30d-vs-24h]\] | 标签归因窗口 30d vs 24h 关键差异 ⭐          | active |
 
 ## 样本版本关系
 

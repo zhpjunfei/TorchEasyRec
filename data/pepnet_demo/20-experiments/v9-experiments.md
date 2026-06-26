@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-06-10 tags: \[[experiment, v9, ple-d16, tower-depth, search-weight]\] related: \["\[[v8-experiments]\]", "\[[v6-design-matrix]\]", "\[[v7-ple-d-variants]\]", "\[[../10-architecture/pepnet-dcn-ple]\]"\]
+## date: 2026-06-10 tags: [experiment, v9, ple-d16, tower-depth, search-weight] related: \["\[[v8-experiments]\]", "\[[v6-design-matrix]\]", "\[[v7-ple-d-variants]\]", "\[[../10-architecture/pepnet-dcn-ple]\]"\]
 
 # v9 实验 — 解决 PLE+d16 全天效果衰减
 

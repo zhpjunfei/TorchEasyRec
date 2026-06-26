@@ -4,7 +4,7 @@ ______________________________________________________________________
 
 # Data Schema — 特征体系
 
-> 本项目使用的全部特征 (40+). 详细勘探见 `99-archive/feature_understanding.md` (老文件, 保留供追溯).
+> 本项目使用的全部特征 (40+). 详细勘探见 `99-archive/feature-understanding.md` (老文件, 保留供追溯).
 
 ## 特征分组 (用于 PEPNetDCNPLE)
 
@@ -56,7 +56,7 @@ ______________________________________________________________________
 
 - **类型**: `expr_feature`, `embedding_dim: 8`, 20 buckets
 - **CDOT 角色**: 可选, v7_ple_ph 实验证实 PLE 下是噪声
-- **详细分析**: 见 `99-archive/feature_understanding.md` (pub_hours 关键发现)
+- **详细分析**: 见 `99-archive/feature-understanding.md` (pub_hours 关键发现)
   - P50=8.57h, P75=21.59h, P90=33.52h, P99=48.29h
   - CTR 峰值 2h (3.79%) — 新品红利
   - CVR 峰值 16-20h — 用户决策滞后
@@ -66,7 +66,7 @@ ______________________________________________________________________
 
 - **site**: 350+ 个值, site 346 (话题) click→CVR 0% (content stream)
 - **level**: B(26%) → F(41%) click→CVR monotonic, embedding_dim=8
-- **详见**: `99-archive/site_mapping.md` (老文件, 保留追溯)
+- **详见**: `99-archive/site-mapping-archive.md` (老文件, 保留追溯)
 
 ### is_reedited_after_exposure
 

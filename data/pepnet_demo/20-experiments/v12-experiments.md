@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-06-23 tags: [experiment, v12, loss-optimization, uncertainty-weight, weight-tune, pareto] related: ["[v11-experiments]", "[../10-architecture/pepnet-dcn-ple]"]
+## date: 2026-06-23 tags: [experiment, v12, loss-optimization, uncertainty-weight, weight-tune, pareto] related: ["[[v11-contrastive-learning]]", "[[../10-architecture/pepnet-dcn-ple]]"]
 
 # v12 实验 — Loss 优化策略
 

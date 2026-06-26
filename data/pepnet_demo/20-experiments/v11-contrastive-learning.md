@@ -1,3 +1,7 @@
+______________________________________________________________________
+
+## date: 2026-06-17 tags: [experiment, v11, contrastive-learning, label-smoothing] status: completed related: ["[[v12-experiments]]", "[[../10-architecture/pepnet-dcn-ple]]"]
+
 # V11 实验日志：对比学习 → Label Smoothing → LR 调度
 
 ## 1. 背景
