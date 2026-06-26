@@ -1,65 +1,151 @@
+# 优化方向深度审核
+
+## 一、我们所知的全部事实
+
+### 18 个实验建立的知识
+
+```
+loss 加权 → 全部失败（ctr45 除外）
+梯度手术 → 无效
+辅助 loss → 无效
+梯度隔离 → 严重负向（证明 CVR 信号有价值）
+Deep CVR tower → 严重过拟合
+Embedding dropout → 贡献 0.32% CVR（最意外的强信号）
+```
+
+### 审核中发现的关键漏洞
+
+CVR tower 的 `dropout_ratio` 被 `LHUC_PPNet` 静默忽略。`use_ln` 同样被忽略。
+
+**当前 CVR tower 实际结构：**
+
+- `LHUC_PPNet(512→512→256→128)` — 3 层 Linear，中间无任何 dropout / BN / LN
+- 接 `Linear(128→1)`
+- 是**一个完全没有正则化的 3 层 MLP，运行在 5% 的训练数据上**
+
+这意味着我们过去 18 个实验全部基于一个有**隐含设计缺陷**的 CVR tower。
+
+### 正确设置 CVR tower 的要素
+
+| 要素         | 当前状态                                      | 应该有的状态                |
+| :----------- | :-------------------------------------------- | --------------------------- |
+| 容量         | [512,256,128]（512→512 是同维映射，浪费参数） | [256,128]（匹配 5% 数据）   |
+| Dropout      | **无**（`dropout_ratio` 被忽略）              | 有（0.3~0.5）               |
+| Weight Decay | 0.01（与共享层相同）                          | 0.03~0.05（CVR 专属更高值） |
+| Layer Norm   | **无**（`use_ln` 被忽略）                     | 可加（若修改 LHUC_PPNet）   |
+
 ______________________________________________________________________
 
-## date: 2026-06-25 tags: [experiment, v13, pcgrad, gradient-surgery] related: ["[v12-experiments]"]
+## 二、各方向批判性评估
 
-# v13 实验 — PCGrad 梯度手术
+### 方向 A：缩小 CVR tower 为 [256,128]
 
-> 基于 v12 结论（CTR=4.5 为最优静态权重），验证 PCGrad 梯度手术能否进一步提升。思路：CVR 梯度与 CTR 冲突时移除冲突分量，保护共享表示。配置：PCGrad + CTR=4.5。
+**原理**：移除 512→512 的同维映射层，减少参数 ~80%（163K→33K）。
 
-## 实验
+**优点**：唯一不修代码的容量缩减手段。
 
-| 实验 | Config | 变化 |
-| :--- | :----- | :--- |
-| pcgrad_ctr45 | `v13/home_flow_2604_v13_pcgrad_ctr45.config` | CTR=4.5, `use_pcgrad: true` |
+**局限**：
 
-## 实验结果
+- 没有 dropout，缩小容量只能减少"过拟合空间"，不能主动正则化
+- 效果上限有限
 
-| 实验 | auc_ctr | Δauc_ctr | bce_ctr | auc_cvr | Δauc_cvr | bce_cvr |
-| :--- | :------ | :------- | :------ | :------ | :------- | :------ |
-| baseline (v12, CTR=3.3) | 0.716316 | — | 1.933748 | 0.757583 | — | 0.493283 |
-| ctr45 (v12, CTR=4.5) | 0.717057 | **+0.10%** | 2.634723 | 0.757881 | **+0.04%** | 0.493627 |
-| pcgrad_ctr45 | 0.716778 | +0.06% | 2.635201 | 0.757290 | −0.04% | 0.493876 |
+**概率估计**：~20% 产生 >0.05% CVR 提升
 
-## 分析
+### 方向 B：CVR tower dropout（已取消）
 
-### PCGrad 未带来额外收益
+**原因**：改一个无法生效的配置无意义。已确认 `dropout_ratio` 被 `LHUC_PPNet` 丢弃。
 
-pcgrad_ctr45 双方 AUC 均低于纯 ctr45：
-- Δauc_ctr: +0.06% vs +0.10%（差 0.04%）
-- Δauc_cvr: −0.04% vs +0.04%（差 0.08%）
+### 方向 C：out_task_space_weight=0.01
 
-差异处于评估噪声水平（SE≈0.00086），但方向一致偏负，不构成正向信号。
+**原理**：非点击样本 `is_conversion=0`，以 1% 权重加入 CVR 训练 → 100% 样本覆盖。
 
-### 为什么不 Work
+**风险（样本选择偏差）**：
 
-PCGrad 设计用于梯度量级接近的多任务场景。在 CTR=4.5 的权重下：
+- 非点击群体与点击群体的特征分布系统性不同
+- CVR 塔可能学到"像非点击→低 CVR"的代理模式，而非真正的转化信号
+- `cvr_add_ctr_logits=true` 部分缓解（CTR logits 已编码点击信息），但未消除
+
+**概率估计**：\<10% 产生正向效果。零成本可试，但不值得期待。
+
+### 方向 D：给 LHUC_PPNet 加真正 dropout（修复模块）
+
+**原理**：修改 `LHUC_PPNet.__init__` 接受 `dropout_ratio`，在每层 Linear 后加 `nn.Dropout`。
+
+**为什么可能是这 18 个实验后最大收益源**：
+
+- CVR tower **从未**有过 dropout
+- 唯一一次与 dropout 相关的实验是 embedding dropout（optimized config，−0.32% CVR）— 那是 embedding 层，不是 tower 层
+- dropout 是防止小数据过拟合最成熟的手段
+
+**工作量**：低。修改 1 个文件（`lhuc_net.py`）+ rebuild wheel。
+
+**风险**：接近零。dropout 是标准操作，test 时自动关闭。
+
+**概率估计**：~30% 产生 >0.05% CVR 提升。这是所有方向中最高的。
+
+### 方向 E：part_optimizer 给 CVR tower 更高 weight decay
+
+**原理**：regex 匹配 CVR tower 权重，用 AdamW wd=0.03（3× 默认），不修代码。
+
+**与方向 D 的关系**：互补。dropout 和 weight decay 解决不同问题：
+
+- Dropout：防止神经元 co-adaptation
+- Weight decay：防止单一权重过大
+
+**合理 wd 值**：0.03（建议起点）→ 0.05（激进）。理由：
+
+- CVR tower 无 dropout → wd 是替代正则化
+- 默认 0.01 是针对 100% 数据设计的，CVR 仅 5% → 5× 不算过分
+- bias 不加 wd（已有做法）
+
+**概率估计**：~15% 产生 >0.05% CVR 提升（单独使用）。与 dropout 叠加时更高。
+
+______________________________________________________________________
+
+## 三、各方向效果的真实预期
 
 ```
-||g_ctr||  ≈ 4.5 × ||g_cvr||₀
+效果大小（Δauc_cvr）
+    │
+0.3% │ optimized 实验（缺 embedding dropout）
+    │   ← 这是唯一真实数据点：缺失正则化 = −0.32%
+    │
+0.1% │ 方向 D（修复 dropout）— 最好预期
+    │  ← 可能接近 but < 0.32%（embed dropout 覆盖 168 层，tower dropout 只覆盖 1 层）
+    │
+0.05%│ 方向 A（缩小容量）+ 方向 E（weight decay）
+    │  方向 C（out_task_space）— 最不确定
+    │
+  0  └────────────────→ ctr45 baseline
 ```
 
-其中 `||g_cvr||₀` 为 CVR 的原始梯度范数。PCGrad 的投影操作：
+**关键认识**：即使方向 D 成功，CVR 提升幅度也不太可能超过 embedding dropout 的 0.32%——因为 tower dropout 只影响 1 个 MLP（CVR tower），而 embedding dropout 影响 168 个 embedding 层。
 
-```
-proj_{g_cvr}(g_ctr) = (g_ctr · g_cvr) / ||g_cvr||² · g_cvr
-proj_{g_ctr}(g_cvr) = (g_ctr · g_cvr) / ||g_ctr||² · g_ctr
-```
+______________________________________________________________________
 
-- 大梯度 g_ctr 投影到小梯度 g_cvr 上：系数 `(g_ctr · g_cvr) / ||g_cvr||²` 很大 → 但作用在 g_cvr 上，g_cvr 本来就小，修改量也小。
-- 小梯度 g_cvr 投影到大梯度 g_ctr 上：系数 `(g_ctr · g_cvr) / ||g_ctr||²` 很小 → 对 g_ctr 的修改微乎其微。
+## 四、行动建议
 
-结果：PCGrad 在 4.5x 不平衡下几乎失能，偶尔触发反而可能移除 CVR 中有用的非冲突信号。
+### 立即执行（无代码变更）
 
-### 与早期 step 1000 的矛盾
+| 步骤               | 具体                                  | 预期                   |
+| :----------------- | :------------------------------------ | :--------------------- |
+| 1. Config A        | CVR tower [256,128]                   | 缩小容量，低配版正则化 |
+| 2. Config E        | part_optimizer wd=0.03 on CVR weights | 替代正则化             |
+| 3. Config A+E 叠加 | 缩小 + wd                             | 两步互补               |
+| 4. Config C        | out_task_space_weight=0.01            | 零成本博彩             |
 
-step 1000 时 PCGrad 显示 BCE_ctr 显著更低（−0.18），但 step 7757 最终无收益。说明：
-- 在训练极早期（LR 刚升到峰值），参数随机初始化，梯度冲突比例高 → PCGrad 清理冲突有短期好处
-- 但随着训练进行，模型趋于稳定，冲突比例下降 → PCGrad 的干预从"有益"变为"无影响"
+### 代码变更
 
-## 结论
+| 步骤                   | 具体                              | 工作量             |
+| :--------------------- | :-------------------------------- | :----------------- |
+| 5. 修复 LHUC_PPNet     | 加 `dropout_ratio` + `nn.Dropout` | 1 文件，~5 行      |
+| 6. rebuild wheel       | `python3 -m build --wheel`        | 1 分钟             |
+| 7. 跑 A + dropout 叠加 | [256,128] + dropout 0.3 + wd 0.03 | 最完整的正则化实验 |
 
-1. **PCGrad 未提升 ctr45** — 在 4.5x 梯度不平衡下 PCGrad 基本失能。
+### 最终判断
 
-2. **CTR=4.5 仍是 v12~v13 最优配置** — PCGrad、PE-MTL、UncertaintyWeight 三种自适应方案均未超过简单静态权重调优。
+方向 C 已不值得单独跑。把精力集中在：
 
-3. **Loss/梯度层面的优化到此为止** — 已验证 12+ 个实验（权重扫描、UW、PE-MTL、PCGrad），唯一正向信号来自 CTR 静态提权至 4.5。CVR 提升的根本瓶颈不在梯度/损失层面的精细调整，在训练信号量本身。
+**A[256,128] + E[wd=0.03] + D[dropout=0.3]** 的组合。
+
+这是我们在这 18 个穷举实验之后，唯一有认真理论基础（CVR tower 从未被正确正则化过）的优化方向。

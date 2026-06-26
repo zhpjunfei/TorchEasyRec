@@ -236,6 +236,7 @@ class PEPNetDCNPLE(MultiTaskRank):
             tower_kwargs = config_to_kwargs(tower_cfg)
             mlp_cfg = tower_kwargs.get("mlp", {"hidden_units": [256, 128, 64]})
             hidden_units = list(mlp_cfg.get("hidden_units", [256, 128, 64]))
+            dropout_ratio = float(mlp_cfg.get("dropout_ratio", 0.0))
             self._task_towers.append(
                 LHUC_PPNet(
                     input_dim=task_output_dims[tower_idx],
@@ -243,6 +244,7 @@ class PEPNetDCNPLE(MultiTaskRank):
                     nn_dims=hidden_units,
                     nn_activation=ppnet_activation,
                     lhuc_hidden_units=ppnet_lhuc_hidden,
+                    dropout_ratio=dropout_ratio,
                 )
             )
             tower_name = tower_cfg.tower_name
@@ -257,6 +259,7 @@ class PEPNetDCNPLE(MultiTaskRank):
             )
 
         self._cvr_add_ctr_logits = self._model_config.cvr_add_ctr_logits
+        self._isolate_cvr_gradient = self._base_model_config.isolate_cvr_gradient
 
         # --- Contrastive Learning ---
         self._contrastive_loss_weight = 0.1
@@ -414,9 +417,10 @@ class PEPNetDCNPLE(MultiTaskRank):
         tower_hidden = {}
         for i, task_tower_cfg in enumerate(self._task_tower_cfgs):
             tower_name = task_tower_cfg.tower_name
-            tower_hidden[tower_name] = self._task_towers[i](
-                extraction_network_fea[i], lhuc_input
-            )
+            fea = extraction_network_fea[i]
+            if self._isolate_cvr_gradient and tower_name != self._ctr_tower_name:
+                fea = fea.detach()
+            tower_hidden[tower_name] = self._task_towers[i](fea, lhuc_input)
 
         # --- Final logits with cvr_add_ctr_logits ---
         tower_outputs = {}

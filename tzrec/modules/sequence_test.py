@@ -20,9 +20,11 @@ from tzrec.modules.sequence import (
     PoolingEncoder,
     SelfAttentionEncoder,
     SimpleAttention,
+    TransformerEncoder,
     create_seq_encoder,
 )
 from tzrec.protos import module_pb2, seq_encoder_pb2
+from tzrec.utils.fx_util import symbolic_trace
 from tzrec.utils.test_util import TestGraphType, create_test_module
 
 
@@ -331,6 +333,197 @@ class CreateSequenceTest(unittest.TestCase):
         encoder = create_seq_encoder(config, group_total_dim)
         self.assertEqual(encoder.__class__, DINEncoder)
         self.assertEqual(encoder.output_dim(), 12)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TransformerEncoderTest(unittest.TestCase):
+    @parameterized.expand(
+        [
+            [TestGraphType.NORMAL, False, 0],
+            [TestGraphType.FX_TRACE, False, 0],
+            [TestGraphType.JIT_SCRIPT, False, 0],
+            [TestGraphType.NORMAL, False, 3],
+            [TestGraphType.FX_TRACE, False, 3],
+            [TestGraphType.JIT_SCRIPT, False, 3],
+            [TestGraphType.NORMAL, True, 0],
+            [TestGraphType.FX_TRACE, True, 0],
+            [TestGraphType.JIT_SCRIPT, True, 0],
+        ]
+    )
+    def test_transformer_encoder(self, graph_type, use_dropout, max_seq_length) -> None:
+        dropout = 0.5 if use_dropout else 0.0
+        encoder = TransformerEncoder(
+            sequence_dim=16,
+            query_dim=16,
+            input="click_seq",
+            transformer_hidden=32,
+            num_heads=4,
+            num_layers=1,
+            dropout=dropout,
+            max_seq_length=max_seq_length,
+        )
+        self.assertEqual(encoder.output_dim(), 16)
+        encoder = create_test_module(encoder, graph_type)
+        if max_seq_length > 0:
+            embedded = {
+                "click_seq.query": torch.randn(4, 16),
+                "click_seq.sequence": torch.randn(4, max_seq_length, 16),
+                "click_seq.sequence_length": torch.clamp_max(
+                    torch.tensor([2, 3, 4, 5]), max_seq_length
+                ),
+            }
+        else:
+            embedded = {
+                "click_seq.query": torch.randn(4, 16),
+                "click_seq.sequence": torch.randn(4, 10, 16),
+                "click_seq.sequence_length": torch.tensor([2, 3, 4, 5]),
+            }
+        result = encoder(embedded)
+        self.assertEqual(result.size(), (4, 16))
+
+    @parameterized.expand(
+        [[TestGraphType.NORMAL], [TestGraphType.FX_TRACE], [TestGraphType.JIT_SCRIPT]]
+    )
+    def test_transformer_encoder_query_dim_mismatch(self, graph_type) -> None:
+        encoder = TransformerEncoder(
+            sequence_dim=32,
+            query_dim=16,
+            input="click_seq",
+            transformer_hidden=64,
+            num_heads=4,
+            num_layers=1,
+            dropout=0.0,
+        )
+        self.assertEqual(encoder.output_dim(), 32)
+        encoder = create_test_module(encoder, graph_type)
+        embedded = {
+            "click_seq.query": torch.randn(4, 16),
+            "click_seq.sequence": torch.randn(4, 10, 32),
+            "click_seq.sequence_length": torch.tensor([2, 3, 4, 5]),
+        }
+        result = encoder(embedded)
+        self.assertEqual(result.size(), (4, 32))
+
+    @parameterized.expand(
+        [[TestGraphType.NORMAL], [TestGraphType.FX_TRACE], [TestGraphType.JIT_SCRIPT]]
+    )
+    def test_transformer_encoder_zero_sequence(self, graph_type) -> None:
+        encoder = TransformerEncoder(
+            sequence_dim=16,
+            query_dim=16,
+            input="click_seq",
+            transformer_hidden=32,
+            num_heads=4,
+            num_layers=1,
+            dropout=0.0,
+        )
+        encoder = create_test_module(encoder, graph_type)
+        embedded = {
+            "click_seq.query": torch.randn(4, 16),
+            "click_seq.sequence": torch.randn(4, 10, 16),
+            "click_seq.sequence_length": torch.zeros(4, dtype=torch.long),
+        }
+        result = encoder(embedded)
+        self.assertEqual(result.size(), (4, 16))
+        # Should not produce NaN
+        self.assertFalse(torch.isnan(result).any().item())
+
+    def test_transformer_encoder_numerical_parity(self) -> None:
+        """Verify normal, FX-traced, and JIT-scripted outputs are identical."""
+        encoder = TransformerEncoder(
+            sequence_dim=16,
+            query_dim=16,
+            input="click_seq",
+            transformer_hidden=32,
+            num_heads=4,
+            num_layers=1,
+            dropout=0.0,
+        )
+        embedded = {
+            "click_seq.query": torch.randn(4, 16),
+            "click_seq.sequence": torch.randn(4, 10, 16),
+            "click_seq.sequence_length": torch.tensor([2, 3, 4, 5]),
+        }
+        out_normal = encoder(embedded)
+        gm = symbolic_trace(encoder)
+        out_fx = gm(embedded)
+        sm = torch.jit.script(gm)
+        out_jit = sm(embedded)
+        self.assertAlmostEqual((out_normal - out_fx).abs().max().item(), 0.0, places=6)
+        self.assertAlmostEqual((out_normal - out_jit).abs().max().item(), 0.0, places=5)
+
+    def test_transformer_encoder_gradient_flow(self) -> None:
+        """Verify gradients flow through the transformer layers."""
+        encoder = TransformerEncoder(
+            sequence_dim=16,
+            query_dim=16,
+            input="click_seq",
+            transformer_hidden=32,
+            num_heads=4,
+            num_layers=1,
+            dropout=0.0,
+        )
+        embedded = {
+            "click_seq.query": torch.randn(4, 16),
+            "click_seq.sequence": torch.randn(4, 10, 16),
+            "click_seq.sequence_length": torch.tensor([2, 3, 4, 5]),
+        }
+        output = encoder(embedded)
+        loss = output.sum()
+        loss.backward()
+        has_grad = any(
+            p.grad is not None and p.grad.abs().sum() > 0 for p in encoder.parameters()
+        )
+        self.assertTrue(has_grad, "No parameters received gradients")
+
+    def test_transformer_encoder_multi_layer(self) -> None:
+        """Verify multi-layer transformer works."""
+        encoder = TransformerEncoder(
+            sequence_dim=16,
+            query_dim=16,
+            input="click_seq",
+            transformer_hidden=32,
+            num_heads=4,
+            num_layers=3,
+            dropout=0.0,
+        )
+        embedded = {
+            "click_seq.query": torch.randn(4, 16),
+            "click_seq.sequence": torch.randn(4, 10, 16),
+            "click_seq.sequence_length": torch.tensor([2, 3, 4, 5]),
+        }
+        result = encoder(embedded)
+        self.assertEqual(result.size(), (4, 16))
+        self.assertFalse(torch.isnan(result).any().item())
+
+    def test_transformer_encoder_factory(self) -> None:
+        """Verify create_seq_encoder factory creates correct instance."""
+        te_cfg = seq_encoder_pb2.SeqEncoderConfig()
+        te_cfg.transformer_encoder.input = "click_seq"
+        te_cfg.transformer_encoder.transformer_hidden = 32
+        te_cfg.transformer_encoder.num_heads = 4
+        te_cfg.transformer_encoder.num_layers = 1
+        te_cfg.transformer_encoder.dropout = 0.0
+        te_cfg.transformer_encoder.max_seq_length = 10
+
+        group_total_dim = {
+            "click_seq.query": 16,
+            "click_seq.sequence": 16,
+        }
+        encoder = create_seq_encoder(te_cfg, group_total_dim)
+        self.assertIsInstance(encoder, TransformerEncoder)
+        self.assertEqual(encoder.output_dim(), 16)
+
+        embedded = {
+            "click_seq.query": torch.randn(4, 16),
+            "click_seq.sequence": torch.randn(4, 10, 16),
+            "click_seq.sequence_length": torch.tensor([2, 3, 4, 5]),
+        }
+        result = encoder(embedded)
+        self.assertEqual(result.size(), (4, 16))
 
 
 if __name__ == "__main__":

@@ -414,3 +414,130 @@ def create_seq_encoder(
     seq_config_dict["query_dim"] = query_dim
     seq_encoder = model_cls(**seq_config_dict)
     return seq_encoder
+
+
+class TransformerEncoder(SequenceEncoder):
+    """Transformer-based target-aware sequence encoder.
+
+    Similar to DINEncoder but uses a Transformer layer between the
+    target-aware attention projection and the final pooling. This
+    enables modeling intra-sequence dependencies while retaining
+    target conditioning.
+
+    Architecture:
+        target-aware concat -> Linear -> Transformer ->
+        Linear -> masked softmax -> pooled output
+
+    Args:
+        sequence_dim (int): sequence tensor channel dimension.
+        query_dim (int): query tensor channel dimension.
+        input (str): input feature group name.
+        transformer_hidden (int): transformer hidden dimension.
+        num_heads (int): number of attention heads in transformer.
+        num_layers (int): number of transformer encoder layers.
+        dropout (float): dropout rate for transformer layers.
+        max_seq_length (int): maximum sequence length.
+    """
+
+    def __init__(
+        self,
+        sequence_dim: int,
+        query_dim: int,
+        input: str,
+        transformer_hidden: int = 64,
+        num_heads: int = 4,
+        num_layers: int = 1,
+        dropout: float = 0.0,
+        max_seq_length: int = 0,
+        **kwargs,
+    ) -> None:
+        super().__init__(input)
+        self._sequence_dim = sequence_dim
+        self._query_dim = query_dim
+        self._transformer_hidden = transformer_hidden
+        self._num_heads = num_heads
+        self._max_seq_length = max_seq_length
+
+        self._query_name = f"{input}.query"
+        self._sequence_name = f"{input}.sequence"
+        self._sequence_length_name = f"{input}.sequence_length"
+
+        # Project from DIN-style concat (q,c,q-c,q*c -> 4*seq_dim) to transformer_hidden
+        concat_dim = sequence_dim * 4
+        self._proj_in = nn.Linear(concat_dim, transformer_hidden)
+        self._dropout_in = nn.Dropout(dropout)
+
+        # Transformer encoder layer
+        if transformer_hidden % num_heads != 0:
+            raise ValueError(
+                f"transformer_hidden ({transformer_hidden}) must be "
+                f"divisible by num_heads ({num_heads})"
+            )
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=transformer_hidden,
+            nhead=num_heads,
+            dim_feedforward=transformer_hidden * 4,
+            dropout=dropout,
+            batch_first=True,
+            norm_first=False,  # Pre-norm can cause instability with short sequences
+        )
+        self._transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # Project transformer output back to sequence_dim
+        self._proj_out = nn.Linear(transformer_hidden, sequence_dim)
+
+        # Target-aware attention score (scalar per position)
+        self._attn_score = nn.Linear(sequence_dim, 1)
+
+    def output_dim(self) -> int:
+        """Output dimension of the module."""
+        return self._sequence_dim
+
+    def forward(self, sequence_embedded: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Forward the module."""
+        query = sequence_embedded[self._query_name]
+        sequence = sequence_embedded[self._sequence_name]
+        sequence_length = sequence_embedded[self._sequence_length_name]
+
+        if self._max_seq_length > 0:
+            sequence_length = torch.clamp_max(sequence_length, self._max_seq_length)
+            sequence = sequence[:, : self._max_seq_length, :]
+
+        max_seq_length = sequence.size(1)
+        sequence_mask = fx_arange(
+            max_seq_length, device=sequence_length.device
+        ).unsqueeze(0) < sequence_length.unsqueeze(1)
+
+        # Handle query dim mismatch (same logic as DINEncoder)
+        if hasattr(self, "query_proj"):
+            query = self.query_proj(query)
+        elif self._query_dim < self._sequence_dim:
+            query = F.pad(query, (0, self._sequence_dim - self._query_dim))
+
+        # Target-aware feature concatenation (same as DINEncoder)
+        queries = query.unsqueeze(1).expand(-1, max_seq_length, -1)
+        attn_input = torch.cat(
+            [queries, sequence, queries - sequence, queries * sequence], dim=-1
+        )
+
+        # Project to transformer hidden dim
+        h = self._proj_in(attn_input)
+        h = self._dropout_in(h)
+
+        # Transformer encoding (masked via padding)
+        # Create a boolean mask for padding (True = valid, False = pad)
+        pad_mask = ~sequence_mask  # [B, T] for TransformerEncoderLayer (must be 2D)
+        h = self._transformer(h, src_key_padding_mask=pad_mask)
+
+        # Project back to sequence_dim
+        h = self._proj_out(h)
+
+        # Target-aware attention scores
+        scores = self._attn_score(h).transpose(1, 2)  # [B, 1, T]
+
+        # Apply mask and softmax
+        padding = torch.ones_like(scores) * (-(2**31) + 1)
+        scores = torch.where(sequence_mask.unsqueeze(1), scores, padding)
+        scores = F.softmax(scores, dim=-1)
+
+        return torch.matmul(scores, sequence).squeeze(1)

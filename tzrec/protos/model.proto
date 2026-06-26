@@ -110,4 +110,9 @@ message ModelConfig {
     // weight for the CTCVR auxiliary loss term
     optional float ctcvr_loss_weight = 17 [default = 1.0];
 
+    // whether to isolate CVR gradient from flowing back to shared layers
+    // when true, CVR tower's input is detached, preventing CVR gradients
+    // from modifying shared/extraction network parameters
+    optional bool isolate_cvr_gradient = 18 [default = false];
+
 }

@@ -95,18 +95,20 @@ class LHUC_PPNet(nn.Module):
         nn_dims: List[int],
         nn_activation: str = "nn.ReLU",
         lhuc_hidden_units: Optional[List[int]] = None,
+        dropout_ratio: float = 0.0,
     ) -> None:
         super().__init__()
         if lhuc_hidden_units is None:
             lhuc_hidden_units = [256]
         self.nn_dims = nn_dims
         self.num_layers = len(nn_dims)
+        self.dropout_ratio = dropout_ratio
 
         self.tower_layers = nn.ModuleList()
         self.gate_mlps = nn.ModuleList()
 
         cur_dim = input_dim
-        for idx, nn_dim in enumerate(nn_dims):
+        for _idx, nn_dim in enumerate(nn_dims):
             gate_units = list(lhuc_hidden_units) + [cur_dim]
             gate_layers = []
             gprev = lhuc_dim
@@ -119,6 +121,10 @@ class LHUC_PPNet(nn.Module):
 
             self.tower_layers.append(nn.Linear(cur_dim, nn_dim))
             cur_dim = nn_dim
+
+        self.dropout = (
+            nn.Dropout(dropout_ratio) if dropout_ratio > 0.0 else nn.Identity()
+        )
 
         act_str = nn_activation.strip()
         if act_str:
@@ -135,9 +141,7 @@ class LHUC_PPNet(nn.Module):
         """Get output dimension."""
         return self.nn_dims[-1]
 
-    def forward(
-        self, x: torch.Tensor, lhuc_inputs: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, lhuc_inputs: torch.Tensor) -> torch.Tensor:
         """Forward pass for LHUC PPNet.
 
         Matches TF order: scale → Dense → activation
@@ -157,4 +161,7 @@ class LHUC_PPNet(nn.Module):
             x = self.tower_layers[idx](x)
             if idx < self.num_layers - 1:
                 x = self.activation(x)
+                x = self.dropout(x)
+            else:
+                x = self.dropout(x)
         return x

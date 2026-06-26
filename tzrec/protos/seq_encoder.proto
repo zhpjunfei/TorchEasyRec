@@ -13,7 +13,7 @@ message DINEncoder {
     // maximum sequence length
     optional int32 max_seq_length = 6 [default = 0];
     // time gate dim: if > 0, the last `time_gate_dim` dims of seq_emb
-    // are used as time-stamp features for multiplicative time gating:
+    // are time-stamp features used for multiplicative time gating:
     //   score *= sigmoid(Linear(ts_emb))
     optional int32 time_gate_dim = 7 [default = 0];
 }
@@ -64,12 +64,30 @@ message MultiWindowDINEncoder {
     repeated uint32 windows_len = 4;
 }
 
+message TransformerEncoder {
+    // seq encoder name
+    optional string name = 1;
+    // sequence feature name
+    required string input = 2;
+    // transformer hidden dimension (projection from DIN concat dim)
+    optional int32 transformer_hidden = 3 [default = 64];
+    // self attention num heads
+    optional int32 num_heads = 4 [default = 4];
+    // number of transformer encoder layers
+    optional int32 num_layers = 5 [default = 1];
+    // dropout for transformer layers and projection
+    optional float dropout = 6 [default = 0.0];
+    // maximum sequence length
+    optional int32 max_seq_length = 7 [default = 0];
+}
+
 message SeqEncoderConfig {
     oneof seq_module {
         DINEncoder din_encoder = 1;
         SimpleAttention simple_attention = 2;
         PoolingEncoder pooling_encoder = 3;
         MultiWindowDINEncoder multi_window_din_encoder = 4;
+        TransformerEncoder transformer_encoder = 8;
         SelfAttentionEncoder self_attention_encoder = 6;
     }
 }
