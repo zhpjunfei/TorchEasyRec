@@ -1,3 +1,7 @@
+______________________________________________________________________
+
+## date: 2026-05-30 tags: [archive, pepnet-v2, dbmtl, comparison] status: archived related: ["[[../10-architecture/pepnet-v2]]"]
+
 **PEPNet_v2 vs DBMtl_DCNv2 优化点总结**
 
 | 方面           | DBMtl_DCNv2 (v1c)                   | PEPNet_v2 (pepnet)                                    | 优化说明                                                                       |

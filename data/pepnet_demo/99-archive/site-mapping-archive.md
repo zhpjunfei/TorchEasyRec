@@ -1,3 +1,7 @@
+______________________________________________________________________
+
+## date: 2026-05-30 tags: [archive, site-mapping, raw-data] status: archived related: ["[[../30-data/site-mapping]]"]
+
 # site_e 编码与站点名映射
 
 共计 350 个站点编码映射。

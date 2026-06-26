@@ -1,3 +1,7 @@
+______________________________________________________________________
+
+## date: 2026-05-30 tags: [archive, feature, exploration] status: archived related: ["[[../30-data/sample-v3-pipeline]]"]
+
 # 推荐系统特征勘探报告
 
 ## 📊 表结构概览

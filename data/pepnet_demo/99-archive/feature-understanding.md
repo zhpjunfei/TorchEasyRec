@@ -1,3 +1,7 @@
+______________________________________________________________________
+
+## date: 2026-05-30 tags: [archive, feature, data-schema] status: archived related: ["[[../10-architecture/data-schema]]"]
+
 # Feature Understanding
 
 ## Feature Groups

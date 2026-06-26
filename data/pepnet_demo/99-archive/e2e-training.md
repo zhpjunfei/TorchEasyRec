@@ -1,3 +1,7 @@
+______________________________________________________________________
+
+## date: 2026-05-29 tags: [archive, torch-easy-rec, training] status: archived related: ["[[../10-architecture/pepnet-dcn-ple]]"]
+
 # TorchEasyRec E2E 训练流程
 
 本文以 `PEPNet_v2` 为例，说明从配置到训练的完整数据流。

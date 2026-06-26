@@ -1,3 +1,7 @@
+______________________________________________________________________
+
+## date: 2026-05-29 tags: [archive, torch-easy-rec, custom-model] status: archived related: ["[[../10-architecture/pepnet-dcn-ple]]"]
+
 # TorchEasyRec 自定义模型流程
 
 本文以 `PEPNet_v2` 为例，说明在 TorchEasyRec 中新增一个模型需要完成的 8 个步骤。
