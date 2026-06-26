@@ -151,11 +151,11 @@ ______________________________________________________________________
 
 **待验证方向（优先级排序）：**
 
-|  P  | 实验                         | 预期                   | config                       |
-| :-: | :--------------------------- | :--------------------- | :--------------------------- |
-| P0  | ots002 + segdiag             | uv 级安全性验证        | `config_c_ots002_segdiag`    |
-| P0  | ots005 (out_task=0.05)       | 确认最优 ots 边界      | `config_c_ots005` ✅ 已提交  |
-| P1  | dropout03 + segdiag          | uv 级安全性验证        | `config_c_dropout03_segdiag` |
-| P1  | C + CTR weight=5.4 + segdiag | 机制独立叠加           | 待创建                       |
-| P2  | dropout0 (out_task=0.01)     | 恢复原始 +0.43%        | `config_c_dropout0` ✅ 已配  |
-| P2  | out_task 更细扫描            | 0.01~0.03 之间找精确值 | 待创建                       |
+|  P  | 实验                       | 预期                         | config                          |
+| :-: | :------------------------- | :--------------------------- | :------------------------------ |
+| P0  | **ots002_uv**              | uv 级指标验证（mmb_id GAUC） | `config_c_ots002_uv` ✅ 新建    |
+| P0  | **ots005** (out_task=0.05) | 确认最优 ots 边界            | `config_c_ots005` ✅ 已配       |
+| P1  | **dropout03_uv**           | uv 级指标验证（mmb_id GAUC） | `config_c_dropout03_uv` ✅ 新建 |
+| P1  | **ots002_ctr54_uv**        | 两机制独立叠加 + uv 验证     | 待创建                          |
+| P2  | dropout0 (out_task=0.01)   | 纯 ots 基线验证              | `config_c_dropout0` ✅ 已配     |
+| P2  | ots015 / ots025            | 精确 ots 扫描                | 待创建                          |

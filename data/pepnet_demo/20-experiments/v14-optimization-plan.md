@@ -93,12 +93,12 @@ ______________________________________________________________________
 
 ### Phase 2（当前，1 轮实验）
 
-| 序号 | 实验                             | 内容                            | 目的              | 优先级 |
-| :--: | :------------------------------- | :------------------------------ | :---------------- | :----: |
-|  1   | **ots005**（out_task=0.05）      | CVR dropout=0.1, ots=0.05       | 确认 ots 上限边界 | **P0** |
-|  2   | **ots002 + segdiag**             | ots002 + grouped_auc metrics    | uv 级安全性验证   | **P0** |
-|  3   | **dropout03 + segdiag**          | dropout03 + grouped_auc metrics | uv 级安全性验证   | **P1** |
-|  4   | **ots002 + CTR w=5.4 + segdiag** | 两机制独立叠加，带 uv 安全验证  | 机制叠加验证      | **P1** |
+| 序号 | 实验                             | 内容                                               | 目的                             | 优先级 |
+| :--: | :------------------------------- | :------------------------------------------------- | :------------------------------- | :----: |
+|  1   | **ots005**（out_task=0.05）      | CVR dropout=0.1, ots=0.05                          | 确认 ots 上限边界                | **P0** |
+|  2   | **ots002_uv**                    | ots002 + grouped_auc { grouping_key: "mmb_id" }    | uv 级指标验证（user-level GAUC） | **P0** |
+|  3   | **dropout03_uv**                 | dropout03 + grouped_auc { grouping_key: "mmb_id" } | uv 级指标验证（user-level GAUC） | **P1** |
+|  4   | **ots002 + CTR w=5.4 + segdiag** | 两机制独立叠加，带 uv 安全验证                     | 机制叠加验证                     | **P1** |
 
 ### Phase 3（参数精调）
 
@@ -123,13 +123,12 @@ ______________________________________________________________________
 ## 四、实验提交顺序建议
 
 ```
-Round 1（当前）: ots005 → ots002_segdiag → dropout03_segdiag    # 2+1 个 config
-Round 2:          ots002_ctr54_segdiag → ots015 → ots025          # 叠加实验 + 细扫描
+Round 1（当前）: ots005 → ots002_uv → dropout03_uv     # 3 个 config
+Round 2:          ots002_ctr54_uv → ots015 → ots025      # 叠加实验 + 细扫描
 ```
 
 **Round 1 优先级最高：**
 
-1. **ots005** — 确认 ots=0.05 是否已经过饱和（边界验证）
-1. **ots002 + segdiag** — 最优 CVR config 的 uv 级安全性验证
-1. **dropout03 + segdiag** — 次优 config 的 uv 级安全性验证
-1. **ots002 + CTR w=5.4 + segdiag** — 两机制叠加，确认是否正正交
+1. **ots005** — 确认 ots=0.05 是否已过饱和（边界验证）
+1. **ots002_uv** — 最优 CVR config 的 user-level GAUC 安全性验证
+1. **dropout03_uv** — 次优 config 的 user-level GAUC 安全性验证
