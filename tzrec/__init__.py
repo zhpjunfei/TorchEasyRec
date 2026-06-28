@@ -49,6 +49,7 @@ except Exception:
     pass
 
 import logging as _logging  # NOQA
+import random as _random  # NOQA
 import torch as _torch  # NOQA
 import numpy as _np  # NOQA
 from tzrec.utils import load_class as _load_class  # NOQA
@@ -67,6 +68,8 @@ if _torch_manual_seed:
 _numpy_manual_seed = _os.getenv("NUMPY_MANUAL_SEED", "42")
 if _numpy_manual_seed:
     _np.random.seed(int(_numpy_manual_seed))
+if _torch_manual_seed:
+    _random.seed(int(_torch_manual_seed))
 _use_deterministic_algorithms = _os.getenv("USE_DETERMINISTIC_ALGORITHMS", "1") == "1"
 if _use_deterministic_algorithms:
     _torch.use_deterministic_algorithms(True)

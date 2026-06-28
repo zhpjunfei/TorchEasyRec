@@ -185,6 +185,9 @@ class MultiTaskRank(RankModel):
                     num_class=task_tower_cfg.num_class,
                     suffix=f"_{tower_name}",
                 )
+            label_name = task_tower_cfg.label_name
+            if self._use_ctcvr_loss and label_name == "is_conversion":
+                continue
             for loss_cfg in task_tower_cfg.losses:
                 self._init_loss_metric_impl(loss_cfg, suffix=f"_{tower_name}")
 
@@ -214,6 +217,8 @@ class MultiTaskRank(RankModel):
                     suffix=f"_{tower_name}",
                 )
             if losses is not None:
+                if self._use_ctcvr_loss and label_name == "is_conversion":
+                    continue
                 for loss_cfg in task_tower_cfg.losses:
                     self._update_loss_metric_impl(
                         losses,

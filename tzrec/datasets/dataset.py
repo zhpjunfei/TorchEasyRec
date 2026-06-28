@@ -827,7 +827,7 @@ def create_dataloader(
             _np.random.seed(worker_seed + worker_id)
             _torch.manual_seed(worker_seed + worker_id)
 
-    if num_workers > 0 and mode != Mode.TRAIN:
+    if num_workers > 0:
         kwargs["worker_init_fn"] = _seed_worker
 
     dataloader = DataLoader(
