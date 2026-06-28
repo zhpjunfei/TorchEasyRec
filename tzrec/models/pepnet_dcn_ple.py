@@ -232,6 +232,7 @@ class PEPNetDCNPLE(MultiTaskRank):
             else [256]
         )
 
+        self._tower_hidden_dims = {}
         for tower_idx, tower_cfg in enumerate(self._task_tower_cfgs):
             tower_kwargs = config_to_kwargs(tower_cfg)
             mlp_cfg = tower_kwargs.get("mlp", {"hidden_units": [256, 128, 64]})
@@ -254,12 +255,14 @@ class PEPNetDCNPLE(MultiTaskRank):
             tower_name = tower_cfg.tower_name
             if tower_name == "ctr":
                 self._ctr_tower_name = tower_name
+            self._tower_hidden_dims[tower_name] = (
+                hidden_units[-1] if hidden_units else task_output_dims[tower_idx]
+            )
 
-        tower_hidden_dim = hidden_units[-1] if hidden_units else task_output_dims[0]
         for tower_cfg in self._task_tower_cfgs:
             tower_name = tower_cfg.tower_name
             self._tower_final[tower_name] = nn.Linear(
-                tower_hidden_dim, tower_cfg.num_class
+                self._tower_hidden_dims[tower_name], tower_cfg.num_class
             )
 
         self._cvr_add_ctr_logits = self._model_config.cvr_add_ctr_logits
