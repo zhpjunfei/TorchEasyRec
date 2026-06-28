@@ -316,3 +316,18 @@ ______________________________________________________________________
 | gap_cvr 约 5.2pp        |     —     | 5.25→**4.58pp**（ots=0.20 触底）  | ots 缩小 offline–online 差距，0.20 为最优         |
 | ctcvr 有效？            |     —     | **+0.29pp GAUC_cvr, −0.07pp CTR** | ❌ 中性偏负                                       |
 | ots 天花板              |     —     |     0.50 边际仅 +0.025pp/0.01     | ⏹️ 完结，无需继续扫                               |
+
+## 七、下一阶段：PLE 容量升级（2026-06-28 启动）
+
+**背景：** 所有超参调优 lever 已穷尽（ots/dropout/tower width/wd/ctcvr/梯度手术/自适应加权）。CVR GAUC 从 0.6957 → 0.7413（+4.56pp）。下一步方向：架构升级。
+
+**假设：** CVR tower 的瓶颈不在 tower MLP（已测 −0.18pp），而在于 **PLE extraction network 的共享表征容量**。PLE 控制两个 task tower 的 expert-gated representation，当前 layer1 只有 2 task × 2 experts + 2 shared = 6 experts × [512,256] MLP。如果 PLE 容量不足，两个 tower 的共享表征质量是瓶颈。
+
+**实验：`ots012_plebig`**
+
+- 基线：ots=0.12（+2.88pp 安全区）
+- Layer1: expert_num_per_task 2→3, share_num 2→3, hidden_units [512,256]→[1024,512]
+- Layer2: expert_num_per_task 2→3, share_num 2→3, hidden_units [256,128]→[512,256]
+- PLE 参数量：6×[512,256] ≈ 1.2M → 9×[1024,512] ≈ 4.7M（~4x）
+- 预期：GAUC_cvr 相对 ots012 +1~2pp
+- 风险：过拟合（需要靠 ots=0.12 的非点击数据压制）
