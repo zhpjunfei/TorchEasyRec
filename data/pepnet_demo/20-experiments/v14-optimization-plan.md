@@ -65,34 +65,27 @@ ______________________________________________________________________
 
 ## 三、v15 实验路线图
 
-### Phase 2（当前 — 架构容量）
+### Round 1（当前 — config-only，可并行）
 
-| 序号 | 实验                       | 内容                                     | 目的                            | 优先级 |
-| :--: | :------------------------- | :--------------------------------------- | :------------------------------ | :----: |
-|  1   | **ots012_plebig** 🏃       | PLE expert 3×3×[1024,512]/[512,256]      | 共享表征容量翻 4x               | **P0** |
-|  2   | *ots012_plebig_wide_tower* | 如 plebig 有效，恢复 tower 宽度          | PLE 容量 + tower 宽度叠加       |   P1   |
-|  3   | *ots012_plec*              | 只加 expert count（2→3），不加 width     | 分离 expert count vs width 效果 |   P2   |
-|  4   | *ots012_plew*              | 只加 expert width，不加 count            | 同上                            |   P2   |
-|  5   | **contrastive_phase2**     | alignment_mode: "column"→"bidirectional" | 对比学习第二阶段                |   P1   |
+| 序号 | 实验                   | 内容                                   | 目的               | 优先级 |
+| :--: | :--------------------- | :------------------------------------- | :----------------- | :----: |
+|  1   | **seq_transformer** 🏃 | click_50_seq: DIN → TransformerEncoder | 升级 sequence 建模 | **P0** |
+|  2   | **cdot_out8**          | CDOT output_dim: 4→8                   | 保留更多交叉信息   |   P1   |
+|  3   | **dcnv2_cross6**       | DCNv2 cross_num: 4→6                   | 更多特征交叉层     |   P2   |
 
-如果 Phase 2 有效（GAUC_cvr > +1pp），主攻架构方向；否则转特征方向。
+### Round 2（数据 pipeline 改动）
 
-### Phase 3（特征工程）
+| 序号 | 实验            | 内容                                                  | 优先级 |
+| :--: | :-------------- | :---------------------------------------------------- | :----: |
+|  4   | 实时短窗口特征  | rt5m/rt15m — Flink SQL → FeatureStore → ODPS → Config |   P0   |
+|  5   | 实时 ratio 特征 | click_rate_rt — Flink SQL 新增曝光计数                |   P0   |
+|  6   | 用户侧实时统计  | user\_\_cnt_click_rt1h 等                             |   P1   |
 
-| 序号 | 实验                     | 内容                                     | 目的                           | 优先级 |
-| :--: | :----------------------- | :--------------------------------------- | :----------------------------- | :----: |
-|  6   | **实时短窗口特征**       | item\_\_cnt_click_rt5m/15m/30m           | 捕捉更精细的实时热度           |   P0   |
-|  7   | **实时 ratio 特征**      | click_rate_rt, conversion_rate_rt        | 真实热度度量（而非 raw count） |   P0   |
-|  8   | **用户侧实时统计**       | user\_\_cnt_click_rt1h 等                | 用户当下活跃度/兴趣            |   P1   |
-|  9   | **实时 × 属性 cross**    | rt_hot × login_city / gender / dev_brand | 实时热门 × 用户画像            |   P2   |
-|  10  | **Sequence Transformer** | click_50_seq: DIN→TransformerEncoder     | 捕捉 item 间交互               |   P1   |
-|  11  | **KV 实时特征增强**      | 新增更多 attribute 的 rt KV 特征         | 用户实时兴趣分布               |   P2   |
-
-### Phase 4（部署与最终调优）
+### Phase 3（部署与最终调优）
 
 | 序号 | 实验                 | 内容                                     | 目的                      | 优先级 |
 | :--: | :------------------- | :--------------------------------------- | :------------------------ | :----: |
-|  12  | 最优 config 重复验证 | ots=0.12/0.15 + Phase 2/3 增益           | 确认可复现                |   P0   |
+|  12  | 最优 config 重复验证 | ots=0.12/0.15 + Round 1/2 增益           | 确认可复现                |   P0   |
 |  13  | 在线融合 β 调优      | fusion_score = CTR × CVR^β               | 线上 CTR vs CVR trade-off |   P0   |
 |  14  | gap_cvr 监控         | 离线 GAUC vs 在线 UV GAUC 差距           | 验证离线评估有效性        |   P0   |
 |  15  | BCE_cvr 校准         | 如 \<0.420 需校准（temperature scaling） | 防止过置信                |   P1   |
@@ -102,24 +95,21 @@ ______________________________________________________________________
 ## 四、决策树
 
 ```
-ots sweep completed (+4.56pp max)
+Round 1（config-only，1-2天）
 │
-├── PLE capacity (ots012_plebig)
-│   │
-│   ├── ✅ >+1pp → 主攻架构
-│   │   │
-│   │   ├── decompose: expert count vs width
-│   │   ├── then: tower width re-test
-│   │   └── then: contrastive Phase 2
-│   │
-│   └── ❌ <+0.5pp → 放弃架构，转特征
-│       │
-│       ├── real-time features (short window / ratio)
-│       ├── sequence encoder upgrade
-│       └── contrastive Phase 2 (low-cost Hail Mary)
+├── seq_transformer ≥ +0.5pp → 主攻 sequence 方向
+│   ├── num_layers 1→2
+│   ├── 扩展 to like_50_seq, chaprice_50_seq
+│   └── transformer_hidden 64→128
 │
-└── deploy ots=0.12 or 0.15
-    └── online fusion β tuning
+├── cdot_out8 ≥ +0.3pp → CDOT capacity 调优
+│   ├── output_dim 8→16
+│   └── compress_hidden 放大
+│
+├── dcnv2_cross6 ≥ +0.2pp → 更多交叉层有效
+│
+└── 全部 < +0.2pp → 确认模型容量极限，启动 Round 2 数据驱动
+    └── 实时特征 = 最后一搏
 ```
 
 ______________________________________________________________________
