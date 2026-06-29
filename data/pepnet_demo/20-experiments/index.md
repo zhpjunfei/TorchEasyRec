@@ -20,8 +20,7 @@ ______________________________________________________________________
 | v12  | \[[v12-experiments]\]          | 损失优化策略                         |  completed   |
 | v13  | \[[v13-experiments]\]          | 优化方向审核                         |  completed   |
 | v14  | \[[v14-experiments]\]          | out_task_space_weight 全扫描完结     | ✅ completed |
-| v14  | \[[v14-optimization-plan]\]    | 路线图（v15 方向更新）               |  🏃 active   |
-| v15  | \[[v15-feature-plan]\]         | 特征工程实施计划（PLE 证伪后转向）   |  🏃 active   |
+| v14  | \[[v14-optimization-plan]\]    | 路线图（Round 1 更新）               |  🏃 active   |
 
 ## 基础设施实验
 
