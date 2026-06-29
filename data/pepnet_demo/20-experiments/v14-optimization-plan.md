@@ -4,7 +4,9 @@ ______________________________________________________________________
 
 # v15 优化路线图（ots 扫完后的新方向）
 
+> ⭐ Codex 深度审查版见 \[[v14-optimization-plan-codex]\] — 以 UV CTR + UV CVR 为核心目标的全新路线图。
 > ots 全扫（21 点 0.005→0.50）GAUC_cvr 从 0.6957 → 0.7413，所有超参 lever 已穷尽。转向架构升级。
+> seq_transformer 方案已完成代码实现（2026-06-29），详见下文 §六。
 
 ______________________________________________________________________
 
@@ -67,11 +69,11 @@ ______________________________________________________________________
 
 ### Round 1（当前 — config-only，可并行）
 
-| 序号 | 实验                   | 内容                                   | 目的               | 优先级 |
-| :--: | :--------------------- | :------------------------------------- | :----------------- | :----: |
-|  1   | **seq_transformer** 🏃 | click_50_seq: DIN → TransformerEncoder | 升级 sequence 建模 | **P0** |
-|  2   | **cdot_out8**          | CDOT output_dim: 4→8                   | 保留更多交叉信息   |   P1   |
-|  3   | **dcnv2_cross6**       | DCNv2 cross_num: 4→6                   | 更多特征交叉层     |   P2   |
+| 序号 | 实验                   | 内容                                      | 目的                               | 优先级 |
+| :--: | :--------------------- | :---------------------------------------- | :--------------------------------- | :----: |
+|  1   | **seq_transformer** 🏃 | click_50_seq: 完全重写 TransformerEncoder | 升级 sequence 建模，详细设计见 §六 | **P0** |
+|  2   | **cdot_out8**          | CDOT output_dim: 4→8                      | 保留更多交叉信息                   |   P1   |
+|  3   | **dcnv2_cross6**       | DCNv2 cross_num: 4→6                      | 更多特征交叉层                     |   P2   |
 
 ### Round 2（数据 pipeline 改动）
 
@@ -117,7 +119,146 @@ ______________________________________________________________________
 ## 五、实验提交顺序（当前）
 
 ```
-Round 1 (当前): ots012_plebig 🏃
-Round 2:        contrastive_phase2 (低投入高周转)
-Round 3:        根据 plebig 结果决定架构或特征方向
+Round 1 (当前): ots012_seq_transformer 🏃（代码+config 已就绪）
+Round 2:        cdot_out8, dcnv2_cross6 (config-only, 可并行)
+Round 3:        根据 Round 1/2 结果决定
 ```
+
+______________________________________________________________________
+
+## 六、seq_transformer 完整方案
+
+### 6.1 动机
+
+原有 TransformerEncoder 有 4 个架构问题：
+
+| #   | 问题                                                                                     | 严重程度 |
+| :-- | :--------------------------------------------------------------------------------------- | :------: |
+| 1   | **Target leakage**: `[q, s, q-s, q×s]` 864 维 concat 作为 proj_in 输入，q 注入所有 token | 🔴 致命  |
+| 2   | **Score-value 空间不匹配**: `score=Linear(h)` 但 `value=s`，梯度混叠噪声                 | 🔴 致命  |
+| 3   | **双注意力冗余**: Transformer self-attention + DIN MLP scoring，都做 importance modeling |  🟡 中   |
+| 4   | **Feature explosion**: 864→128 (6.75:1) 压缩，噪声信号通过 q-s/q×s 进入                  |  🟡 中   |
+
+### 6.2 新架构
+
+```
+s [B,T,216] ─→ proj_in ─→ Transformer ─→ h [B,T,128]    ← 纯序列，无 target
+q [B,216]   ─→ proj_in ─→ q_proj [B,128]                  ← 同 W，同空间
+
+cross-attention:
+  scores = q_proj · h^T / √128         [B,1,T]            ← 0 参数
+  attended = softmax(scores) · h       [B,128]            ← target 选择
+
+vector gate:
+  gate = sigmoid(MLP([q, attended, q⊙attended]))  [B,128] ← 384→64→128
+  fused = attended·gate + mean(h)·(1-gate)          [B,128] ← 逐 dim 融合
+  output = LN(fused)                                 [B,128] ← 无残余
+  output = proj_pooled(output)                       [B,216]
+```
+
+### 6.3 两套注意力分工
+
+| 机制                          |                     公式 | 参数  | 角色                        |
+| :---------------------------- | -----------------------: | :---: | :-------------------------- |
+| Self-attention (Transformer)  | `s_i → h_i` with context | 197K  | 序列内上下文建模            |
+| Cross-attention (dot-product) |         `q · h_i / √128` | **0** | target 驱动的 position 选择 |
+
+完全正交：self-attention 做表示，cross-attention 做选择。
+
+### 6.4 代码改动 `tzrec/modules/sequence.py`
+
+**旧类 `TransformerEncoder` (行 419-543) → 完全重写 (行 419-573)**
+
+| 组件            |                            改前 |                  改后                   |
+| :-------------- | ------------------------------: | :-------------------------------------: |
+| `proj_in` input |           `[q,s,q-s,q×s]` (864) |             `s` only (216)              |
+| `proj_in`       |              `Linear(864, 128)` |           `Linear(216, 128)`            |
+| proj_in 使用    |                   sequence only |        **共享**: s + q 都走此 W         |
+| Transformer     |                              同 |                   同                    |
+| scoring         | `Linear(h) → 1` (content-based) |  dot-product `q·h^T/√128` (**0 参数**)  |
+| pooling value   |               `s` (原始空间) ❌ |            `h` (128 空间) ✅            |
+| gating          |                              无 | `MLP([q,attn,q⊙attn]) → [B,128]` 向量门 |
+| fusion          |                              无 |     `attended·gate + mean·(1-gate)`     |
+| output          |                     直接 return |      `LN(fused).proj_pooled(→216)`      |
+
+**关键修复**:
+
+- 🔴 `query * seq_mean` dim mismatch bug → 统一用 `q_proj_2d` (128-dim)
+- 🔴 `score from h, value from s` → value=`h`
+- 🔴 target leakage → Transformer 只看到 `s`
+
+### 6.5 Config 改动
+
+文件: `home_flow_2604_v14_config_c_ots012_seq_transformer.config`
+
+```protobuf
+# 改动 1: click_50_seq sequence_group 加 3 个 query 特征
+feature_names: "core_entity"
+feature_names: "click_50_seq__core_entity"
+feature_names: "first_cate_id"        # 新增 ←
+feature_names: "second_cate_id"       # 新增 ←
+feature_names: "third_cate_id"        # 新增 ←
+feature_names: "click_50_seq__first_cate_id"
+feature_names: "click_50_seq__second_cate_id"
+feature_names: "click_50_seq__third_cate_id"
+
+# 改动 2: 替换 encoder
+transformer_encoder {
+  input: "click_50_seq"
+  transformer_hidden: 128
+  num_heads: 4
+  num_layers: 1
+  dropout: 0.1
+  max_seq_length: 50
+}
+```
+
+### 6.6 参数清单
+
+| 组件          |           公式 |        参数 |      占比 |
+| :------------ | -------------: | ----------: | --------: |
+| `proj_in`     |        216→128 |      27,776 |     0.07% |
+| `Transformer` |  1L 4H FFN 512 |     197,632 |     0.49% |
+| `gate_mlp`    |         384→64 |      24,640 |     0.06% |
+| `gate_proj`   |         64→128 |       8,320 |     0.02% |
+| `gate_ln`     | LayerNorm(128) |         256 |   \<0.01% |
+| `proj_pooled` |        128→216 |      27,864 |     0.07% |
+| **total**     |                | **286,488** | **0.72%** |
+
+相比原 DIN encoder (~119K) 增加了 ~167K，相对 40M 全模型可忽略。
+
+### 6.7 设计决策
+
+| 决策                 | 选项                                       |         选择          | 理由                                  |
+| :------------------- | :----------------------------------------- | :-------------------: | :------------------------------------ |
+| Transformer 是否含 q | `s` / `s+q` / `s+Linear(q)`                |     **`s` only**      | 避免 target leakage，线上校准稳定     |
+| proj_in 是否共享     | 共享 / 独立                                |       **共享**        | q 和 h 同空间，dot-product 语义有意义 |
+| scoring 方式         | MLP / dot-product / concat                 |    **dot-product**    | 0 参数，无双注意力冗余                |
+| gate 类型            | 标量 / 向量                                |   **向量 [B,128]**    | 逐 dim 独立融合，表达能力更强         |
+| gate 输入            | `[q,mean,q⊙mean]` / `[q,attn,mean,q⊙attn]` | **`[q,attn,q⊙attn]`** | 不含 mean，避免和 (1-g) 路径重复注入  |
+| fusion 后处理        | LN / LN+residual / 无                      |     **LN(fused)**     | 无 residual 冲刷门控信号              |
+| query-seq dim 要求   | 允许不等 / 强制相等                        |     **强制相等**      | proj_in 共享要求 dim 一致             |
+
+### 6.8 边界情况
+
+| 场景                | 行为                                             |
+| :------------------ | :----------------------------------------------- |
+| 空序列 (全 padding) | h=0 → mean=0, scores 全 -inf → attn=0 → output=0 |
+| 单 item             | attended=mean(h)，gate 不影响                    |
+| gate 全 1           | fused=attended → LN(attended) → proj_pooled      |
+| gate 全 0           | fused=mean(h) → LN(mean) → proj_pooled           |
+| 所有 item 等权重    | scores 均匀 → attended=mean(h) → 同单 item       |
+
+### 6.9 与原有 TransformerEncoder 对比
+
+| 维度             |           原版            |          新版           |
+| :--------------- | :-----------------------: | :---------------------: |
+| Target leakage   |    ❌ q 注入所有 token    |        ✅ 纯序列        |
+| proj_in 输入 dim |            864            |           216           |
+| Score 方式       | `Linear(h)` content-based | `q·h/√128` target-aware |
+| Value            |        `s` (原始)         | `h` (transformer 输出)  |
+| 评分参数         |            217            |          **0**          |
+| 门控融合         |            无             |     向量门 [B,128]      |
+| 输出归一化       |            无             |        LN(fused)        |
+| 代码行数         |          ~125 行          |         ~155 行         |
+| 参数量           |           ~336K           |          ~286K          |

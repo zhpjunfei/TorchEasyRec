@@ -419,14 +419,25 @@ def create_seq_encoder(
 class TransformerEncoder(SequenceEncoder):
     """Transformer-based target-aware sequence encoder.
 
-    Similar to DINEncoder but uses a Transformer layer between the
-    target-aware attention projection and the final pooling. This
-    enables modeling intra-sequence dependencies while retaining
-    target conditioning.
-
     Architecture:
-        target-aware concat -> Linear -> Transformer ->
-        Linear -> masked softmax -> pooled output
+        s -> proj_in -> TransformerEncoder -> h
+        q -> proj_in -> cross-attention(q, h) -> attended
+        gate = sigmoid(MLP([q_proj, attended, q⊙attended])) -> [B,128]
+        fused = attended*gate + mean(h)*(1-gate)
+        output = LN(fused) -> proj_pooled -> [B,216]
+
+    Two orthogonal attention mechanisms with distinct roles:
+    - Self-attention (Transformer): pure intra-sequence dependency modeling.
+      Target item is NOT injected into the sequence — no target leakage.
+    - Cross-attention (dot-product q·h/√d): selects positions via query-key
+      similarity — 0 learned parameters, no attention redundancy.
+
+    Key design points:
+    1. No target leakage: Transformer sees only s, not s+q.
+    2. Shared proj_in: q_proj and h in same linear space for clean dot-product.
+    3. Vector gate [B,128]: per-dim blend of attended and mean(h).
+    4. Gate ignores mean(h): avoids double injection with the (1-g) fused path.
+    5. LN on fused only: no extra residual that could wash the gating signal.
 
     Args:
         sequence_dim (int): sequence tensor channel dimension.
@@ -444,7 +455,7 @@ class TransformerEncoder(SequenceEncoder):
         sequence_dim: int,
         query_dim: int,
         input: str,
-        transformer_hidden: int = 64,
+        transformer_hidden: int = 128,
         num_heads: int = 4,
         num_layers: int = 1,
         dropout: float = 0.0,
@@ -458,13 +469,18 @@ class TransformerEncoder(SequenceEncoder):
         self._num_heads = num_heads
         self._max_seq_length = max_seq_length
 
+        assert query_dim == sequence_dim, (
+            f"TransformerEncoder requires query_dim ({query_dim}) == "
+            f"sequence_dim ({sequence_dim}) because proj_in is shared "
+            "between sequence and query paths."
+        )
+
         self._query_name = f"{input}.query"
         self._sequence_name = f"{input}.sequence"
         self._sequence_length_name = f"{input}.sequence_length"
 
-        # Project from DIN-style concat (q,c,q-c,q*c -> 4*seq_dim) to transformer_hidden
-        concat_dim = sequence_dim * 4
-        self._proj_in = nn.Linear(concat_dim, transformer_hidden)
+        # Project sequence (sequence_dim) to transformer_hidden
+        self._proj_in = nn.Linear(sequence_dim, transformer_hidden)
         self._dropout_in = nn.Dropout(dropout)
 
         # Transformer encoder layer
@@ -479,15 +495,28 @@ class TransformerEncoder(SequenceEncoder):
             dim_feedforward=transformer_hidden * 4,
             dropout=dropout,
             batch_first=True,
-            norm_first=False,  # Pre-norm can cause instability with short sequences
+            norm_first=False,
         )
         self._transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # Project transformer output back to sequence_dim
-        self._proj_out = nn.Linear(transformer_hidden, sequence_dim)
+        # Cross-attention selection: q · h_i / √d
+        # proj_in is shared between Transformer path and query scoring path,
+        # ensuring q_proj and h live in the same linear space for clean dot-product.
 
-        # Target-aware attention score (scalar per position)
-        self._attn_score = nn.Linear(sequence_dim, 1)
+        # Attention-aware gating: gate sees target-attention relation only
+        self._gate_mlp = MLP(
+            in_features=transformer_hidden * 3,
+            hidden_units=[64],
+            activation="nn.ReLU",
+            dim=2,
+        )
+        self._gate_proj = nn.Linear(64, transformer_hidden)
+
+        # Feature normalization for stable fusion output
+        self._gate_ln = nn.LayerNorm(transformer_hidden)
+
+        # Final projection from transformer_hidden to output dim
+        self._proj_pooled = nn.Linear(transformer_hidden, sequence_dim)
 
     def output_dim(self) -> int:
         """Output dimension of the module."""
@@ -508,36 +537,35 @@ class TransformerEncoder(SequenceEncoder):
             max_seq_length, device=sequence_length.device
         ).unsqueeze(0) < sequence_length.unsqueeze(1)
 
-        # Handle query dim mismatch (same logic as DINEncoder)
-        if hasattr(self, "query_proj"):
-            query = self.query_proj(query)
-        elif self._query_dim < self._sequence_dim:
-            query = F.pad(query, (0, self._sequence_dim - self._query_dim))
+        # ── Pure sequence encoding (no target leakage) ──
+        h = self._proj_in(sequence)
+        h = self._dropout_in(h)
+        h = self._transformer(h, src_key_padding_mask=~sequence_mask)
 
-        # Target-aware feature concatenation (same as DINEncoder)
-        queries = query.unsqueeze(1).expand(-1, max_seq_length, -1)
-        attn_input = torch.cat(
-            [queries, sequence, queries - sequence, queries * sequence], dim=-1
+        # ── Cross-attention selection: q · h_i / √d ──
+        q_proj = self._proj_in(query).unsqueeze(1)
+        scores = torch.matmul(q_proj, h.transpose(1, 2)) / (
+            self._transformer_hidden**0.5
         )
 
-        # Project to transformer hidden dim
-        h = self._proj_in(attn_input)
-        h = self._dropout_in(h)
-
-        # Transformer encoding (masked via padding)
-        # Create a boolean mask for padding (True = valid, False = pad)
-        pad_mask = ~sequence_mask  # [B, T] for TransformerEncoderLayer (must be 2D)
-        h = self._transformer(h, src_key_padding_mask=pad_mask)
-
-        # Project back to sequence_dim
-        h = self._proj_out(h)
-
-        # Target-aware attention scores
-        scores = self._attn_score(h).transpose(1, 2)  # [B, 1, T]
-
-        # Apply mask and softmax
         padding = torch.ones_like(scores) * (-(2**31) + 1)
         scores = torch.where(sequence_mask.unsqueeze(1), scores, padding)
         scores = F.softmax(scores, dim=-1)
 
-        return torch.matmul(scores, sequence).squeeze(1)
+        attended = torch.matmul(scores, h).squeeze(1)
+
+        # ── Gated fusion ──
+        q_proj_2d = self._proj_in(query)
+        seq_mean = h.mean(dim=1)
+        gate = torch.sigmoid(
+            self._gate_proj(
+                self._gate_mlp(
+                    torch.cat([q_proj_2d, attended, q_proj_2d * attended], dim=-1)
+                )
+            )
+        )
+        fused = attended * gate + seq_mean * (1 - gate)
+        output = self._gate_ln(fused)
+
+        output = self._proj_pooled(output)
+        return output
