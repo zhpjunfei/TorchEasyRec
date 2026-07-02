@@ -148,6 +148,22 @@ class PEPNetDCNPLE(MultiTaskRank):
             self._bias_feature_dims = {}
             self._num_bias_features = 0
 
+        # --- Tag Sequence Group (small expert for pooled behavior sequences) ---
+        self._tag_seq_group_name = "tag_seq_group"
+        if self.embedding_group.has_group(self._tag_seq_group_name):
+            tag_seq_dims = self.embedding_group.group_total_dim(
+                self._tag_seq_group_name
+            )
+            self._tag_seq_mlp = nn.Sequential(
+                nn.Linear(tag_seq_dims, 128),
+                nn.ReLU(),
+                nn.Linear(128, 64),
+            )
+            self._tag_seq_output_dim = 64
+        else:
+            self._tag_seq_mlp = None
+            self._tag_seq_output_dim = 0
+
         # --- Concat dimensions ---
         self._cross_concat_dim = (
             self._main_group_dim if self.cross_net is not None else 0
@@ -157,6 +173,7 @@ class PEPNetDCNPLE(MultiTaskRank):
             + self._cross_concat_dim
             + self._cdot_concat_dim
             + self._num_bias_features
+            + self._tag_seq_output_dim
         )
 
         # --- Component LayerNorm ---
@@ -171,6 +188,23 @@ class PEPNetDCNPLE(MultiTaskRank):
             self.component_ln["allint_mid"] = nn.LayerNorm(self.cdot.output_dim())
         elif self._num_bias_features > 0:
             self.component_ln["bias"] = nn.LayerNorm(self._num_bias_features)
+
+        if self._tag_seq_output_dim > 0:
+            self.component_ln["tag_seq"] = nn.LayerNorm(self._tag_seq_output_dim)
+
+        # --- CVR Shortcut (linear bypass for conversion history features) ---
+        self._cvr_shortcut_group_name = "cvr_shortcut"
+        if self.embedding_group.has_group(self._cvr_shortcut_group_name):
+            cvr_shortcut_dim = self.embedding_group.group_total_dim(
+                self._cvr_shortcut_group_name
+            )
+            self._cvr_shortcut_mlp = nn.Sequential(
+                nn.Linear(cvr_shortcut_dim, 64),
+                nn.ReLU(),
+                nn.Linear(64, 1),
+            )
+        else:
+            self._cvr_shortcut_mlp = None
 
         # --- EPNet (LHUC) ---
         if self.embedding_group.has_group(self._lhuc_group_name):
@@ -391,6 +425,16 @@ class PEPNetDCNPLE(MultiTaskRank):
             cdot_input = self._extract_cdot(cdot_feature_tensors)
             allint_out, allint_mid_out = self.cdot(cdot_input)
 
+        # --- Tag Sequence Group (small expert) ---
+        if self._tag_seq_mlp is not None:
+            tag_seq_out = self._tag_seq_mlp(grouped_features[self._tag_seq_group_name])
+
+        # --- CVR Shortcut ---
+        if self._cvr_shortcut_mlp is not None:
+            cvr_shortcut_logit = self._cvr_shortcut_mlp(
+                grouped_features[self._cvr_shortcut_group_name]
+            )
+
         # --- Concat ---
         concat_parts = []
         concat_parts.append(self.component_ln["main"](main_features))
@@ -403,6 +447,8 @@ class PEPNetDCNPLE(MultiTaskRank):
             concat_parts.append(self.component_ln["allint_mid"](allint_mid_out))
         elif self._num_bias_features > 0:
             concat_parts.append(self.component_ln["bias"](bias_vec))
+        if self._tag_seq_output_dim > 0:
+            concat_parts.append(self.component_ln["tag_seq"](tag_seq_out))
         deep_input = torch.cat(concat_parts, dim=1)
 
         # --- EPNet (LHUC) personalization ---
@@ -445,6 +491,14 @@ class PEPNetDCNPLE(MultiTaskRank):
 
             if tower_name == self._ctr_tower_name:
                 ctr_logits_val = tower_output
+
+        # --- CVR Shortcut addition (non-CTR towers only) ---
+        if self._cvr_shortcut_mlp is not None:
+            for tower_name in tower_outputs:
+                if tower_name != self._ctr_tower_name:
+                    tower_outputs[tower_name] = (
+                        tower_outputs[tower_name] + cvr_shortcut_logit
+                    )
 
         predictions = self._multi_task_output_to_prediction(tower_outputs)
 
