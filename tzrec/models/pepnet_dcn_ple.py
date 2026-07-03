@@ -299,6 +299,45 @@ class PEPNetDCNPLE(MultiTaskRank):
                 self._tower_hidden_dims[tower_name], tower_cfg.num_class
             )
 
+        self._cvr_tower_names = [
+            n for n in self._tower_hidden_dims if n != self._ctr_tower_name
+        ]
+
+        # --- CVR Direct Highway (bypass EPNet→PLE→PPNet) ---
+        # Mode ADD: residual to tower_hidden, uses same final Linear as tower
+        self._cvr_direct_group_name = "cvr_direct"
+        if self.embedding_group.has_group(self._cvr_direct_group_name):
+            cvr_direct_dim = self.embedding_group.group_total_dim(
+                self._cvr_direct_group_name
+            )
+            cvr_direct_target_dim = None
+            for n, d in self._tower_hidden_dims.items():
+                if n != self._ctr_tower_name:
+                    cvr_direct_target_dim = d
+                    break
+            if cvr_direct_target_dim is not None:
+                self._cvr_direct_proj = nn.Linear(cvr_direct_dim, cvr_direct_target_dim)
+            else:
+                self._cvr_direct_proj = None
+        else:
+            self._cvr_direct_proj = None
+
+        # Mode CONCAT: separate projection + final head, logit-level addition
+        self._cvr_direct_concat_group_name = "cvr_direct_concat"
+        if self.embedding_group.has_group(self._cvr_direct_concat_group_name):
+            cvr_direct_concat_dim = self.embedding_group.group_total_dim(
+                self._cvr_direct_concat_group_name
+            )
+            self._cvr_direct_concat_proj = nn.Sequential(
+                nn.Linear(cvr_direct_concat_dim, 64), nn.ReLU()
+            )
+            self._cvr_direct_concat_final = nn.ModuleDict()
+            for tower_name in self._cvr_tower_names:
+                self._cvr_direct_concat_final[tower_name] = nn.Linear(64, 1)
+        else:
+            self._cvr_direct_concat_proj = None
+            self._cvr_direct_concat_final = nn.ModuleDict()
+
         self._cvr_add_ctr_logits = self._model_config.cvr_add_ctr_logits
         self._isolate_cvr_gradient = self._base_model_config.isolate_cvr_gradient
 
@@ -475,6 +514,15 @@ class PEPNetDCNPLE(MultiTaskRank):
                 fea = fea.detach()
             tower_hidden[tower_name] = self._task_towers[i](fea, lhuc_input)
 
+        # --- CVR Direct Highway ---
+        # (residual to tower hidden, bypassing EPNet→PLE→PPNet)
+        if self._cvr_direct_proj is not None:
+            direct_hidden = self._cvr_direct_proj(
+                grouped_features[self._cvr_direct_group_name]
+            )
+            for tower_name in self._cvr_tower_names:
+                tower_hidden[tower_name] = tower_hidden[tower_name] + direct_hidden
+
         # --- Final logits with cvr_add_ctr_logits ---
         tower_outputs = {}
         ctr_logits_val = None
@@ -499,6 +547,17 @@ class PEPNetDCNPLE(MultiTaskRank):
                     tower_outputs[tower_name] = (
                         tower_outputs[tower_name] + cvr_shortcut_logit
                     )
+
+        # --- CVR Direct Highway CONCAT mode ---
+        # (separate head, logit-level addition)
+        if self._cvr_direct_concat_proj is not None:
+            direct_concat_hidden = self._cvr_direct_concat_proj(
+                grouped_features[self._cvr_direct_concat_group_name]
+            )
+            for tower_name in self._cvr_tower_names:
+                tower_outputs[tower_name] = tower_outputs[
+                    tower_name
+                ] + self._cvr_direct_concat_final[tower_name](direct_concat_hidden)
 
         predictions = self._multi_task_output_to_prediction(tower_outputs)
 

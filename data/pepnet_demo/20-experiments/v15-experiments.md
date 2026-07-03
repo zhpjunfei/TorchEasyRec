@@ -1,0 +1,240 @@
+______________________________________________________________________
+
+## date: 2026-07-02 tags: [experiment, v15, like-seq, chaprice-seq, tag-seq, cdot] status: ongoing related: \["[v15-config-variants]"\]
+
+# v15 实验分析：LIKE/CHAPRICE 序列处理方式 + CDOT output_dim/seq_transformer 初步探索
+
+## 背景
+
+Round 1 config-only 实验（seq_transformer, cdot_out8, dcnv2_cross6）和 cvr_shortcut 均已证否（Δ\<0.1pp）。
+在此之前准备了 **6 个 config 变体**，把 LIKE (like_50_seq) 和 CHAPRICE (chaprice_click_50_seq) 从 DIN 序列建模改为扁平特征注入，同时探索其放置位置对效果的影响。
+
+______________________________________________________________________
+
+## 一、变体设计
+
+所有变体共享基础架构 `pepnet_dcn_ple`（CDOT=32→4, DCNv2=4层, PLE 2层, CTR tower [512,256,128], CVR tower [512,256,128]），仅差异如下：
+
+| 变体            |            LIKE/CHAPRICE 序列组            | LIKE/CHAPRICE DIN Encoder | 特征放置                                   | 架构变化                                               |
+| --------------- | :----------------------------------------: | :-----------------------: | ------------------------------------------ | ------------------------------------------------------ |
+| **v1f**（基线） | ✅ 原始 sequence_feature + sequence_groups |            ✅             | "all" group 内                             | —                                                      |
+| **v2**          |      ✅ 仅预编码名 + sequence_groups       |            ✅             | "all" group 内                             | 原始 sequence_feature 块移除                           |
+| **v2_opta**     |                  ❌ 移除                   |          ❌ 移除          | 预编码名加入 "all" group                   | 仅特征层                                               |
+| **v2_optb**     |                  ❌ 移除                   |          ❌ 移除          | 预编码名加入 **"domain" group**（走 CDOT） | 特征→domain group                                      |
+| **v2_optc**     |                  ❌ 移除                   |          ❌ 移除          | 预编码名在 "all" group                     | **PLE 新增 layer3**（128→64, 1 task / 1 share expert） |
+| **v2_tag_seq**  |                  ❌ 移除                   |          ❌ 移除          | 预编码名在单独 **"tag_seq_group"**         | 独立特征组                                             |
+
+### 特征列表
+
+LIKE/CHAPRICE 涉及的预编码特征（各 12 个，共 24 个）：
+
+```
+like_50_seq__related_goods_ids
+like_50_seq__brand
+like_50_seq__core_entity
+like_50_seq__first_cate_id
+like_50_seq__second_cate_id
+like_50_seq__third_cate_id
+like_50_seq__price_tag
+like_50_seq__site
+like_50_seq__spu_id
+like_50_seq__discount_intensity
+like_50_seq__pinpaidengji
+like_50_seq__item_type
+chaprice_click_50_seq__related_goods_ids
+chaprice_click_50_seq__brand
+...（同上 12 个特征）
+```
+
+______________________________________________________________________
+
+## 二、各变体详细差异
+
+### v1f → v2：sequence_feature 移除
+
+v1f 中 LIKE 和 CHAPRICE 有两个定义：
+
+1. **sequence_feature**（数据层）：定义原始序列的字段结构（长度 50，分隔符 `;`），包含每个子特征的 embedding/hash 配置
+1. **sequence_groups**（模型层）：序列组定义，引用 sequence_feature 输出的预编码特征名
+
+v2 移除了步骤 1 的原始 `sequence_feature` 块，仅保留步骤 2 的 `sequence_groups`。这意味着序列的 embedding 配置被移到了数据 pipeline（不在 config 中定义），config 只负责引用已预编码好的特征名。
+
+### v2_opta：LIKE/CHAPRICE 退化为扁平 DEEP 特征
+
+```
+# v2_opta 的 "all" group 末尾新增（直接混入）
+feature_names: "like_50_seq__related_goods_ids"
+feature_names: "like_50_seq__brand"
+...（12 个）
+feature_names: "chaprice_click_50_seq__related_goods_ids"
+...（12 个）
+```
+
+- LIKE/CHAPRICE 的 `sequence_groups` 整块移除
+- 对应的 `din_encoder` 也移除（不再做 target attention）
+- 24 个预编码特征直接作为普通 DEEP flatten 特征加入 "all" group
+- 与 click/favorite/conversion 等序列的 DIN 编码输出走同一路径（DCNv2 → CDOT → EPNet → PLE）
+
+**逻辑假设：** LIKE/CHAPRICE 的时序信息在预编码阶段已被用户画像统计值压缩，DIN attention 的增益有限。去掉后减少参数量，同时释放 "all" group 的容量给其他序列。
+
+### v2_optb：LIKE/CHAPRICE → domain group（走 CDOT）
+
+```
+# v2_optb 的 "domain" group 新增
+feature_names: "like_50_seq__related_goods_ids"
+...（24 个预编码特征）
+```
+
+- 与 opta 不同：特征不放入 "all"，而是放入 **"domain"** group
+- `cdot_group_name: "domain"` — CDOT gating 会为 domain group 的特征学习独立的压缩矩阵
+- `bias_group_name: "domain"` — 也为 domain group 学习独立偏置
+- `lhuc_group_name: "domain"` — LHUC 侧网络也按 domain 分组
+
+**逻辑假设：** LIKE/CHAPRICE 信号与主序列（click/conversion/favorite）的行为模式不同。CDOT 的 domain-specific 压缩可能更适合这批信号，避免与 click 等高频序列在 "all" 中互相干扰。
+
+### v2_optc：LIKE/CHAPRICE 扁平 + PLE 加深
+
+```
+# v2_optc 相比 opta 的额外变化
+extraction_networks {
+  network_name: "layer3"
+  expert_num_per_task: 1
+  share_num: 1
+  task_expert_net {
+    hidden_units: [128, 64]
+    activation: "nn.ReLU"
+  }
+  share_expert_net {
+    hidden_units: [128, 64]
+    activation: "nn.ReLU"
+  }
+}
+```
+
+- LIKE/CHAPRICE 处理同 opta（扁平化 → "all"）
+- PLE 新增第 3 层 extraction_network（128→64），每任务 1 个 expert + 1 个 share expert
+- 原始 2 层：512→256 + 256→128，新增第 3 层：128→64
+- 总 PLE 参数增量约：2×(128×64 + 64×64) ≈ 24K 参数，极小
+
+**逻辑假设：** 扁平化后 "all" group 的输入维度增加了 24 个特征的 embedding，PLE 可能需要更深来消化。但第 3 层容量极小，预期效果微弱。
+
+### v2_tag_seq：独立特征组
+
+```
+feature_groups {
+  group_name: "tag_seq_group"
+  feature_names: "like_50_seq__related_goods_ids"
+  ...（24 个预编码特征）
+}
+```
+
+- LIKE/CHAPRICE 不在 "all" 也不在 "domain"，而是独立成组
+- 目前没有 `cdot_group_name` / `bias_group_name` 指向 "tag_seq_group"
+- 按 PEPNet 现有逻辑，未命名的 feature_group 默认走 DEEP 路径经过 EPNet → 不经过 CDOT，直接拼到 EPNet input
+
+**逻辑假设：** 如果 LIKE/CHAPRICE 与 click/conversion 序列正交（不冲突也不重叠），独立组可以避免稀释 "all" group 中主序列的 DIN attention 信号。但 CDOT 不对独立组做任何 domain 变换。
+
+______________________________________________________________________
+
+## 三、关键参数汇总
+
+| 参数                       | v1f | v2  | v2_opta | v2_optb | v2_optc | v2_tag_seq |
+| -------------------------- | :-: | :-: | :-----: | :-----: | :-----: | :--------: |
+| LIKE 原始 sequence_feature | ✅  | ❌  |   ❌    |   ❌    |   ❌    |     ❌     |
+| LIKE sequence_groups       | ✅  | ✅  |   ❌    |   ❌    |   ❌    |     ❌     |
+| LIKE din_encoder           | ✅  | ✅  |   ❌    |   ❌    |   ❌    |     ❌     |
+| LIKE → "all" group         | ✅  | ✅  |   ✅    |   ❌    |   ✅    |     ❌     |
+| LIKE → "domain" group      | ❌  | ❌  |   ❌    |   ✅    |   ❌    |     ❌     |
+| LIKE → "tag_seq_group"     | ❌  | ❌  |   ❌    |   ❌    |   ❌    |     ✅     |
+| PLE extraction layers      |  2  |  2  |    2    |    2    |  **3**  |     2      |
+
+______________________________________________________________________
+
+## 四、运行状态
+
+全部跑完（v2 结果待补）。
+
+## 五、统一指标对比表
+
+**基线：** `v1f`（对照组）。注：LIKE/CHAPRICE 系列为 **Eval** 指标，NC 系列为 **Training step 8100** 指标，两者绝对值不可跨列比较。
+
+### LIKE/CHAPRICE 扁平化实验（Eval）
+
+|  #  |      实验      | LIKE/CHAPRICE 处理方式                |  auc_ctr (Δpp)   | bce_ctr  |  auc_cvr (Δpp)   | bce_cvr  |
+| :-: | :------------: | :------------------------------------ | :--------------: | :------: | :--------------: | :------: |
+|  —  |   **v1f** 🏁   | 原始 sequence_feature + DIN           |   0.716480 (—)   | 1.933464 |   0.747323 (—)   | 0.494107 |
+|  —  |  **v2_opta**   | 扁平化 → "all" group                  | 0.716094 (−0.05) | 1.934554 | 0.748129 (+0.11) | 0.494703 |
+|  —  |  **v2_optb**   | 扁平化 → "domain" group（走 CDOT）    | 0.716274 (−0.03) | 1.933732 | 0.747542 (+0.03) | 0.494260 |
+|  —  |  **v2_optc**   | 扁平化 → "all" + PLE 3层              | 0.715988 (−0.07) | 1.934504 | 0.747678 (+0.05) | 0.494288 |
+|  —  | **v2_tag_seq** | 扁平化 → 独立 "tag_seq_group"         | 0.715963 (−0.07) | 1.934618 | 0.747191 (−0.02) | 0.494593 |
+|  —  |     **v2**     | 保留 DIN，仅移除原始 sequence_feature |        —         |    —     |        —         |    —     |
+
+### NC 序列组合实验（Training step 8100）
+
+|  #  |    实验    | 新增序列（基于 v1f +）                                                                                                          |  auc_ctr (Δpp)  | bce_ctr  |  auc_cvr (Δpp)  | bce_cvr  |
+| :-: | :--------: | :------------------------------------------------------------------------------------------------------------------------------ | :-------------: | :------: | :-------------: | :------: |
+|  —  | **v1f** 🏁 | 无                                                                                                                              |  0.716480 (—)   | 1.933464 |  0.747323 (—)   | 0.494107 |
+|  —  |   **nc**   | search_conversion_20, like_10/100, search_click_10/100, chajia_click_10/100, offline_search_click_100, offline_chajia_click_100 | 0.71693 (+0.05) | 1.91820  | 0.75595 (+1.16) | 0.48995  |
+|  1  | **nc_v2**  | like_10/100, search_click_10/100, offline_search_click_100                                                                      | 0.71646 (0.00)  | 1.92071  | 0.75455 (+0.97) | 0.48784  |
+|  2  | **nc_v3**  | v2 + offline_like_100                                                                                                           | 0.71683 (+0.04) | 1.92435  | 0.75502 (+1.04) | 0.48797  |
+|  3  | **nc_v4**  | search_conversion_20, chajia_click_10/100, offline_chajia_click_100                                                             | 0.71604 (−0.06) | 1.92118  | 0.75475 (+1.00) | 0.48879  |
+|  4  | **nc_v5**  | search_conversion_20, chajia_click_10/100                                                                                       | 0.71598 (−0.07) | 1.92170  | 0.75490 (+1.02) | 0.48984  |
+|  5  | **nc_v6**  | search_conversion_20, search_click_10/100                                                                                       | 0.71627 (−0.03) | 1.91976  | 0.75458 (+0.98) | 0.49086  |
+|  6  | **nc_v7**  | search_conversion_20, like_10/100, search_click_10/100, chajia_click_10/100                                                     | 0.71662 (+0.01) | 1.92534  | 0.75516 (+1.06) | 0.48960  |
+
+⚠️ NC 系列为 Training step 8100 指标，CVR 存在约 +0.8~1.0pp 系统偏高偏差（训练集 AUC > 验证集）。Δpp 均基于 v1f Eval 值计算，CVR 正值主要反映 train/eval gap，不能解读为序列带来的实际增益。同列内 AUC 绝对值跨系列（Eval vs Training）不可直接比较。
+
+### 序列覆盖矩阵
+
+| 序列                         | v1f | nc  | v2  | v3  | v4  | v5  | v6  | v7  |
+| :--------------------------- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| like_10_seq                  | ❌  | ✅  | ✅  | ✅  | ❌  | ❌  | ❌  | ✅  |
+| like_100_seq                 | ❌  | ✅  | ✅  | ✅  | ❌  | ❌  | ❌  | ✅  |
+| offline_like_100_seq         | ❌  | ❌  | ❌  | ✅  | ❌  | ❌  | ❌  | ❌  |
+| search_conversion_20_seq     | ❌  | ✅  | ❌  | ❌  | ✅  | ✅  | ✅  | ✅  |
+| search_click_10_seq          | ❌  | ✅  | ✅  | ✅  | ❌  | ❌  | ✅  | ✅  |
+| search_click_100_seq         | ❌  | ✅  | ✅  | ✅  | ❌  | ❌  | ✅  | ✅  |
+| offline_search_click_100_seq | ❌  | ✅  | ✅  | ✅  | ❌  | ❌  | ❌  | ❌  |
+| chajia_click_10_seq          | ❌  | ✅  | ❌  | ❌  | ✅  | ✅  | ❌  | ✅  |
+| chajia_click_100_seq         | ❌  | ✅  | ❌  | ❌  | ✅  | ✅  | ❌  | ✅  |
+| offline_chajia_click_100_seq | ❌  | ✅  | ❌  | ❌  | ✅  | ❌  | ❌  | ❌  |
+
+### 分析
+
+**LIKE/CHAPRICE 扁平化（Eval）：**
+
+- CTR 全部微降（−0.03~−0.07pp），在噪声区间（±0.1pp）
+- CVR：opta 最佳 +0.11pp，optc +0.05pp，optb +0.03pp，tag_seq −0.02pp
+- BCE_cvr 全部微升（+0.00015~+0.00060），校准轻微恶化
+- **结论：** DIN 编码移除后效果几乎不变（Δ\<0.1pp），LIKE/CHAPRICE attention 贡献可忽略。optb 的 CDOT 注入和 optc 的 PLE 加深均无额外收益。扁平化混入 "all" 是最简单选择。
+
+**NC 序列组合（Training）：**
+
+- 全部变体 CVR 均低于 nc（−0.11~−0.20pp），完整序列组合有正向协同
+- nc_v2 减 search_conversion + chajia 后 CVR −0.20pp，损失最大
+- nc_v7 仅减 offline 序列后 CVR −0.11pp，损失最小，offline 序列贡献可忽略
+- nc_v3 加 offline_like_100_seq 相对 v2 提升 +0.07pp
+- CTR 波动小（−0.01~−0.14pp），CVR 对序列更敏感
+- **结论：** search_conversion_20_seq 和 chajia_click 是关键贡献者，offline 序列贡献微弱。
+
+______________________________________________________________________
+
+## 六、后续方向
+
+| 序号 | 实验                | 内容                                                |   预期    |
+| :--: | ------------------- | --------------------------------------------------- | :-------: |
+|  1   | **cdot_out8**       | CDOT `output_dim: 4 → 8` 增大压缩通道               | 0.2~0.5pp |
+|  2   | **seq_transformer** | click_50_seq: `din_encoder` → `transformer_encoder` | 0.3~0.8pp |
+|  3   | **dcnv2_cross6**    | `dcnv2 { cross_num: 4 → 6 }` 增加交叉层             | 0.1~0.3pp |
+|  4   | **cvr_shortcut**    | conversion 统计特征 bypass→CVR logit shortcut       | 0.1~0.3pp |
+
+### 决策逻辑
+
+```
+v2_opta/optb/optc/tag_seq 任一 ≥ +0.3pp → 确认 LIKE/CHAPRICE 扁平化有效，选择最优 placement
+cdot_out8 ≥ +0.3pp → CDOT capacity（output_dim 8→16→32）
+seq_transformer ≥ +0.5pp → 主攻 sequence（扩展到更多序列）
+全部 < +0.2pp → 确认模型上限，启动 Round 2 实时特征（Flink SQL 数据 pipeline）
+```
+
+______________________________________________________________________
