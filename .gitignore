@@ -60,10 +60,7 @@ data/pepnet_demo/train/data.csv
 data/pepnet_demo/resources/Untitled-1.sql
 data/pepnet_demo/resources/texts.txt
 skills-lock.json
-data/pepnet_demo/.DS_Store
+**/.DS_Store
 data/pepnet_demo/.obsidian/workspace.json
-data/pepnet_demo/.obsidian/workspace.json
-data/pepnet_demo/.DS_Store
 data/pepnet_demo/resources/pairec_home_v8_多维度统计2.xlsx
 data/pepnet_demo/resources/pairecHomeByHuoshanV4_多维度统计2.xlsx
-data/pepnet_demo/config/.DS_Store
