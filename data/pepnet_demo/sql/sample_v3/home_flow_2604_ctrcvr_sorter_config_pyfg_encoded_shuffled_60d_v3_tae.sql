@@ -23,12 +23,12 @@ FROM (
 -- 【训练集 99%】
 INSERT OVERWRITE TABLE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3_train PARTITION(dt='${bdp.system.bizdate}')
 SELECT  `(_rnd|dt)?+.+`
-WHERE   _rnd < 0.99
+WHERE   _rnd < 0.97
 DISTRIBUTE BY CAST(RAND() * 10000 AS BIGINT)
 
 
 -- 【验证集 1%】 (~200W)
 INSERT OVERWRITE TABLE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3_val PARTITION(dt='${bdp.system.bizdate}')
 SELECT  `(_rnd|dt)?+.+`
-WHERE   _rnd >= 0.99
+WHERE   _rnd >= 0.97
 DISTRIBUTE BY CAST(RAND() * 10000 AS BIGINT)
