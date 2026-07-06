@@ -26,6 +26,7 @@ from tzrec.metrics.decay_auc import DecayAUC
 from tzrec.metrics.grouped_auc import GroupedAUC
 from tzrec.metrics.grouped_xauc import GroupedXAUC
 from tzrec.metrics.normalized_entropy import NormalizedEntropy
+from tzrec.metrics.segment_auc import SegmentAUC
 from tzrec.metrics.train_metric_wrapper import TrainMetricWrapper
 from tzrec.metrics.xauc import XAUC
 from tzrec.models.model import BaseModel
@@ -302,7 +303,7 @@ class RankModel(BaseModel):
         metric_type = metric_cfg.WhichOneof("metric")
         oneof_metric_cfg = getattr(metric_cfg, metric_type)
         metric_kwargs = config_to_kwargs(oneof_metric_cfg)
-        if metric_type in ("grouped_auc", "grouped_xauc"):
+        if metric_type in ("grouped_auc", "grouped_xauc", "segment_auc"):
             metric_name = metric_type + "_" + oneof_metric_cfg.grouping_key + suffix
         else:
             metric_name = metric_type + suffix
@@ -331,11 +332,18 @@ class RankModel(BaseModel):
             assert num_class <= 2, (
                 f"num_class must less than 2 when metric type is {metric_type}"
             )
-            group_name_map = self._build_group_name_map(
-                oneof_metric_cfg.grouping_key
-            )
+            group_name_map = self._build_group_name_map(oneof_metric_cfg.grouping_key)
             self._metric_modules[metric_name] = GroupedAUC(
                 group_name_map=group_name_map
+            )
+        elif metric_type == "segment_auc":
+            assert num_class <= 2, (
+                f"num_class must less than 2 when metric type is {metric_type}"
+            )
+            group_name_map = self._build_group_name_map(oneof_metric_cfg.grouping_key)
+            self._metric_modules[metric_name] = SegmentAUC(
+                target_group=oneof_metric_cfg.target_group,
+                group_name_map=group_name_map,
             )
         elif metric_type == "xauc":
             self._metric_modules[metric_name] = XAUC(**metric_kwargs)
@@ -401,13 +409,13 @@ class RankModel(BaseModel):
     ) -> None:
         metric_type = metric_cfg.WhichOneof("metric")
         oneof_metric_cfg = getattr(metric_cfg, metric_type)
-        if metric_type in ("grouped_auc", "grouped_xauc"):
+        if metric_type in ("grouped_auc", "grouped_xauc", "segment_auc"):
             metric_name = metric_type + "_" + oneof_metric_cfg.grouping_key + suffix
         else:
             metric_name = metric_type + suffix
 
         base_sparse_feat = None
-        if metric_type in ["grouped_auc", "grouped_xauc"]:
+        if metric_type in ["grouped_auc", "grouped_xauc", "segment_auc"]:
             base_sparse_feat = {}
             for kjt in batch.sparse_features.values():
                 base_sparse_feat.update(kjt.to_dict())
@@ -431,7 +439,7 @@ class RankModel(BaseModel):
         elif metric_type == "accuracy":
             pred = predictions["probs" + suffix]
             self._metric_modules[metric_name].update(pred, label)
-        elif metric_type == "grouped_auc":
+        elif metric_type in ("grouped_auc", "segment_auc"):
             pred = (
                 predictions["probs" + suffix]
                 if num_class == 1

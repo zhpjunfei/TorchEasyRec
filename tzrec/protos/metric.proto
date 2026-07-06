@@ -33,6 +33,11 @@ message GroupedAUC {
     required string grouping_key = 1;
 }
 
+message SegmentAUC {
+    required string grouping_key = 1;
+    required int32 target_group = 2;
+}
+
 message XAUC {
     optional float sample_ratio = 1 [default = 1e-3];
     optional uint64 max_pairs = 2;
@@ -62,6 +67,7 @@ message MetricConfig {
         XAUC xauc = 8;
         GroupedXAUC grouped_xauc = 9;
         NormalizedEntropy normalized_entropy = 10;
+        SegmentAUC segment_auc = 11;
     }
 }
 

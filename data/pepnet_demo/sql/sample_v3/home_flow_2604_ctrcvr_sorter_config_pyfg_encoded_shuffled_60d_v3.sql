@@ -22,6 +22,10 @@ set odps.sql.type.system.odps2=true;
 --   phour_x_price STRING,
 --   phour_x_brand STRING
 -- );
+-- ALTER TABLE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3
+-- ADD COLUMNS (
+--   isNewItem BIGINT
+-- );
 
 
 
@@ -91,6 +95,10 @@ END AS fresh_weight_tiered_v2
     ELSE '4'
   END, '_', CONCAT_WS(',', brand)
 ) AS phour_x_brand
+,CASE
+  WHEN pub_hours IS NOT NULL AND pub_hours >= 0 AND pub_hours < 5.0 THEN 1
+  ELSE 0
+END AS isNewItem
 WHERE   dt > TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'), -60, 'dd'), 'yyyymmdd')
 AND     dt <= '${bdp.system.bizdate}'
 -- AND     (ARRAY_CONTAINS(f_req_page, '1w_tab_f_index_content') OR ARRAY_CONTAINS(f_req_page, '1zhekoutuijian'))

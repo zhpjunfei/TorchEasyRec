@@ -14,19 +14,14 @@
 
 ______________________________________________________________________
 
-## 2 方案优先级
+## 2 方案状态总览
 
-```
-                             对辛普森悖论的直接影响
-                             低 ←——————————→ 高
-
-       模型侧 ──────→  对比学习       ┌─────────────────┐
-                        Loss 加权     │ 服务端策略 (P0)  │
-                                      │ · 探索配额       │
-                                      │ · UV 曝光上限    │
-                                      │ · 疲劳控制       │
-                                      └─────────────────┘
-```
+| #   | 方案                                       | 状态      | 类型                              | 风险             |
+| --- | ------------------------------------------ | --------- | --------------------------------- | ---------------- |
+| 3A  | combo 特征（pub_hours × cate/price/brand） | ✅ 已完成 | SQL 预计算 + config id_feature    | 低               |
+| 3B  | 对比学习                                   | ✅ 已完成 | config 1 行                       | 极低             |
+| 3C  | Loss 加权（5 个变体）                      | ✅ 已完成 | SQL 预计算 + config sample_weight | 中（price 混淆） |
+| 3D  | Freshness Gate                             | ⏸️ 暂缓   | 代码 ~40 行                       | 中               |
 
 ______________________________________________________________________
 
@@ -34,7 +29,7 @@ ______________________________________________________________________
 
 ### 3A 组合特征交叉 — `pub_hours × cate_id` / `price_tag` / `brand`
 
-**思路**：在 SQL 中对 `pub_hours` 按业务含义分 5 桶（`<1h/1-6h/6-24h/24-72h/≥72h`），与 `cate_id_path`/`price_tag`/`brand` 拼接成组合 key。模型用 `id_feature` 读取，效果等价于 `combo_feature`。
+**思路**：在 SQL 中对 `pub_hours` 按业务含义分 5 桶（`<1h/1-6h/6-24h/24-72h/≥72h`），与 `cate_id_path`/`price_tag`/`brand` 拼接成组合 key。模型用 `id_feature` 读取，绕过 FG `combo_feature` 不能引用 expr_feature 输出的限制。
 
 **与原始方案的区别**：
 
@@ -55,19 +50,7 @@ ______________________________________________________________________
 桶 4: ≥ 72h    老帖        (~p90+)
 ```
 
-**SQL 实现**（`_shuffled_60d_v3.sql`）：
-
-```sql
-,CONCAT(
-  CASE WHEN pub_hours >= 0 AND pub_hours < 1.0  THEN '0'
-       WHEN pub_hours >= 0 AND pub_hours < 6.0  THEN '1'
-       WHEN pub_hours >= 0 AND pub_hours < 24.0 THEN '2'
-       WHEN pub_hours >= 0 AND pub_hours < 72.0 THEN '3'
-       ELSE '4' END, '_', cate_id_path
-) AS phour_x_cate
-,CONCAT(..., '_', price_tag) AS phour_x_price
-,CONCAT(..., '_', brand)     AS phour_x_brand
-```
+**注意**：`cate_id_path`、`price_tag`、`brand` 为 `ARRAY<STRING>` 类型，SQL 中使用 `CONCAT_WS(',', col)` 转为逗号分隔字符串后再拼接。
 
 **Config 实现**（`id_feature` + ZCH）：
 
@@ -123,27 +106,7 @@ ______________________________________________________________________
 
 #### 数据 pipeline
 
-SQL 已更新，一次产出 5 个 `fresh_weight` 变体：
-
-```sql
-CASE WHEN pub_hours >= 0 AND pub_hours < 1.0 THEN 3.0
-     WHEN pub_hours >= 0 AND pub_hours < 5.0 THEN 1.5
-     ELSE 1.0
-END AS fresh_weight                           -- 分档推荐（默认）
-,CASE WHEN pub_hours >= 0 AND pub_hours < 5.0 THEN 2.0
-      ELSE 1.0
-END AS fresh_weight_binary_2x_5h              -- 简单二值
-,CASE WHEN pub_hours >= 0 AND pub_hours < 2.0 THEN 3.0
-      ELSE 1.0
-END AS fresh_weight_binary_3x_2h              -- 窄窗口高提权
-,CASE WHEN pub_hours >= 0 AND pub_hours < 1.0 THEN 5.0
-      ELSE 1.0
-END AS fresh_weight_binary_5x_1h              -- 极窄极端提权
-,CASE WHEN pub_hours >= 0 AND pub_hours < 0.5 THEN 4.0
-     WHEN pub_hours >= 0 AND pub_hours < 2.0 THEN 2.0
-     ELSE 1.0
-END AS fresh_weight_tiered_v2                 -- 替代分档
-```
+SQL 一次产出 5 个 `fresh_weight` 变体 + 3 个 `phour_x_*` 组合列。
 
 #### `pub_hours` 样本分布（1.34 亿样本）
 
@@ -156,28 +119,13 @@ END AS fresh_weight_tiered_v2                 -- 替代分档
 
 #### 各变体覆盖分析
 
-| 变体                  | 逻辑                  | 新帖覆盖    | 有效权重 | 归一化后权比          |
-| --------------------- | --------------------- | ----------- | -------- | --------------------- |
-| `fresh_weight` (默认) | `<1h→3x, 1-5h→1.5x`   | ~18% / ~20% | avg=1.43 | 2.1x / 1.05x / 0.7x   |
-| `binary_2x_5h`        | `<5h→2x`              | ~38%        | avg=1.38 | 1.45x / 0.72x         |
-| `binary_3x_2h`        | `<2h→3x`              | ~25%        | avg=1.50 | 2.0x / 0.67x          |
-| `binary_5x_1h`        | `<1h→5x`              | ~18%        | avg=1.72 | 2.9x / 0.58x          |
-| `tiered_v2`           | `<0.5h→4x, 0.5-2h→2x` | ~10% / ~25% | avg=1.40 | 2.86x / 1.43x / 0.71x |
-
-#### Config 配置
-
-```protobuf
-data_config {
-    sample_weight_fields: "search_weight"
-    sample_weight_fields: "fresh_weight"       # 切换实验只需改此行
-}
-task_towers {
-    tower_name: "ctr"
-    sample_weight_name: "fresh_weight"         # 与上面对应
-}
-```
-
-**独立 config**：`home_flow_2604_pepnet_v4_cdot32_weight_long_v1f_weight.config`
+| config                | sample_weight_name          | 逻辑                  | 新帖覆盖    | 有效权重 | 归一化权比            |
+| --------------------- | --------------------------- | --------------------- | ----------- | -------- | --------------------- |
+| `weight`              | `fresh_weight` (默认)       | `<1h→3x, 1-5h→1.5x`   | ~18% / ~20% | avg=1.43 | 2.1x / 1.05x / 0.7x   |
+| `weight_binary_2x_5h` | `fresh_weight_binary_2x_5h` | `<5h→2x`              | ~38%        | avg=1.38 | 1.45x / 0.72x         |
+| `weight_binary_3x_2h` | `fresh_weight_binary_3x_2h` | `<2h→3x`              | ~25%        | avg=1.50 | 2.0x / 0.67x          |
+| `weight_binary_5x_1h` | `fresh_weight_binary_5x_1h` | `<1h→5x`              | ~18%        | avg=1.72 | 2.9x / 0.58x          |
+| `weight_tiered_v2`    | `fresh_weight_tiered_v2`    | `<0.5h→4x, 0.5-2h→2x` | ~10% / ~25% | avg=1.40 | 2.86x / 1.43x / 0.71x |
 
 **风险**：新帖平均价格 861 > 老帖 665，权重可能混淆 freshness 与 price。训练后需验证新帖子集独立 AUC。
 
@@ -196,88 +144,95 @@ if self.embedding_group.has_group("freshness"):
         nn.Linear(64, deep_concat_dim),
         nn.Sigmoid(),
     )
-
-if hasattr(self, 'freshness_gate'):
-    fg_scale = self.freshness_gate(grouped_features["freshness"])
-    deep_input = deep_input * (1.0 + self._boost_ratio * fg_scale)
 ```
 
-**状态**：暂缓。等 Loss 加权和对比学习的 A/B 结果出来后再决定是否需要。
+**状态**：暂缓。等 3A/3B/3C 实验出结果后再决定是否需要。
 
 ______________________________________________________________________
 
 ## 4 独立实验设计
 
-2 个已实现 + 1 个规划中：
+### 现有 config 文件总览
 
 ```
-baseline                          # 原生产 config
-  ├── 对比学习 (3B) → contrastive.config
-  ├── Loss加权 (3C) → weight.config
-  └── combo特征 (3A) → combo.config    ← SQL 预计算 + id_feature
+baseline                           *v1f.config
+  ├── 对比学习 (3B)                 *v1f_contrastive.config
+  ├── Loss 加权 (3C, 默认 tiered)   *v1f_weight.config
+  ├── Loss 加权 (binary_2x_5h)      *v1f_weight_binary_2x_5h.config
+  ├── Loss 加权 (binary_3x_2h)      *v1f_weight_binary_3x_2h.config
+  ├── Loss 加权 (binary_5x_1h)      *v1f_weight_binary_5x_1h.config
+  ├── Loss 加权 (tiered_v2)         *v1f_weight_tiered_v2.config
+  └── combo 特征 (3A)               *v1f_combo.config
 ```
 
-推荐实验顺序：先跑风险最低的 contrastive，再跑 weight。
+### 推荐实验顺序
 
-| 实验       | config      | 代码量         | 风险             | 预估收益           |
-| ---------- | ----------- | -------------- | ---------------- | ------------------ |
-| 对比学习   | contrastive | 0 行           | 极低             | 中（DIN 空间改善） |
-| Loss 加权  | weight      | 0 行           | 中（price 混淆） | 中-高              |
-| combo 特征 | combo       | SQL + 0 行代码 | 低               | 低                 |
+```
+Phase 1: contrastive   → 风险最低，先跑先确认
+Phase 2: weight(默认)  → 验证 Loss 加权是否有效
+Phase 3: combo         → 验证组合特征是否有效
+Phase 4: 其余 weight   → 如果 weight 有效，调优阈值
+```
+
+### 上线决策
+
+| 实验离线 AUC               | 决策            |
+| -------------------------- | --------------- |
+| 新帖子集 AUC 提升 < 0.5%   | 不上线          |
+| 新帖子集 AUC 提升 ≥ 0.5%   | AB 测试         |
+| AB 正向且 price 分桶无异常 | 全量上线        |
+| AB 正向但 price 分桶有偏   | 调整权重/桶阈值 |
 
 ______________________________________________________________________
 
-## 5 执行路线
+## 5 验证指标
 
-```
-sprint 1                    sprint 2                  sprint 3
-┌──────────────────┐       ┌──────────────────┐      ┌──────────────────┐
-│ 服务端策略        │  →   │ 模型侧 A/B       │  →   │ 择优上线         │
-│ · 探索配额       │       │                  │      │                  │
-│ · UV 曝光上限    │       │ 实验1: contrastive│      │ 如果两个都有效   │
-│ · 疲劳控制       │       │ 实验2: weight    │      │ 合并上线         │
-│                  │       │                  │      │                  │
-│ pipeline         │       │ 可选: 时间切分   │      │ Freshness Gate   │
-│ fresh_weight 产出│       │ TAE (方案A)     │      │ (如果仍需要)     │
-└──────────────────┘       └──────────────────┘      └──────────────────┘
-```
+| 指标                 | 当前   | 目标              | 验证对象      |
+| -------------------- | ------ | ----------------- | ------------- |
+| 新帖曝光UV占比       | 71.46% | >85%              | 服务端策略    |
+| 新帖 UVCTR           | 28.49% | >35%              | 服务端 + 模型 |
+| 新帖 PVCTR           | 4.99%  | >4.5%（合理下降） | 服务端        |
+| 新帖购买UV占比       | 9.63%  | >15%              | 服务端 + 模型 |
+| 新帖独立 AUC（新增） | 无     | 新增 baseline     | 所有实验      |
+| 新帖 GAUC（新增）    | 无     | 新增 baseline     | 所有实验      |
+| 新帖 price 分桶 AUC  | 无     | 新增 baseline     | Loss 加权实验 |
 
 ______________________________________________________________________
 
-## 6 验证指标
+## 6 不采纳方案及理由
 
-| 指标                 | 当前   | 目标              | 验证对象                    |
-| -------------------- | ------ | ----------------- | --------------------------- |
-| 新帖曝光UV占比       | 71.46% | >85%              | 服务端策略                  |
-| 新帖 UVCTR           | 28.49% | >35%              | 服务端 + 模型               |
-| 新帖 PVCTR           | 4.99%  | >4.5%（合理下降） | 服务端                      |
-| 新帖购买UV占比       | 9.63%  | >15%              | 服务端 + 模型               |
-| 新帖独立 AUC（新增） | 无     | 新增 baseline     | 模型侧（所有实验）          |
-| 新帖 GAUC（新增）    | 无     | 新增 baseline     | 模型侧（所有实验）          |
-| 新帖 price 分桶 AUC  | 无     | 新增 baseline     | Loss 加权（price 混淆监控） |
-
-______________________________________________________________________
-
-## 7 不采纳方案及理由
-
-| 不采纳                                                        | 理由                                      |
-| ------------------------------------------------------------- | ----------------------------------------- |
-| CVR Shortcut 修正                                             | 不是偏见：全零输入输出常量是合理 baseline |
-| DCNv2 特征重复                                                | 已有 4 层 cross + low_rank=256，足够      |
-| CDOT 增强                                                     | 任务不匹配                                |
-| 新帖辅助 tower                                                | 训练数据不足（仅 16.88%）                 |
-| Exploration Head                                              | 有价值但属长期，工作量高                  |
-| combo 特征（FG原生 `combo_feature` 引用 `expr_feature` 输出） | FG 框架不支持链式引用，`no input` 报错    |
+| 不采纳                                        | 理由                                      |
+| --------------------------------------------- | ----------------------------------------- |
+| CVR Shortcut 修正                             | 不是偏见：全零输入输出常量是合理 baseline |
+| DCNv2 特征重复                                | 已有 4 层 cross + low_rank=256，足够      |
+| CDOT 增强                                     | 任务不匹配                                |
+| 新帖辅助 tower                                | 训练数据不足（仅 16.88%）                 |
+| Exploration Head                              | 有价值但属长期，工作量高                  |
+| 原生 `combo_feature` 引用 `expr_feature` 输出 | FG 框架不支持链式引用，`no input` 报错    |
 
 ______________________________________________________________________
 
-## 8 相关文件
+## 7 相关文件
 
-| 文件                              | 说明                                          |
-| --------------------------------- | --------------------------------------------- |
-| `config/*_v1f.config`             | baseline 生产 config                          |
-| `config/*_v1f_combo.config`       | SQL 预计算 + id_feature 方案                  |
-| `config/*_v1f_weight.config`      | Loss 加权（fresh_weight）                     |
-| `config/*_v1f_contrastive.config` | 对比学习                                      |
-| `sql/sample_v3/*_60d_v3.sql`      | 产出 fresh_weight + phour_x\_\* 列的 pipeline |
-| `sql/sample_v3/*_60d_v3_tae.sql`  | train/val 切分（当前为随机 99/1）             |
+### Config 文件
+
+| 文件                               | 说明                              |
+| ---------------------------------- | --------------------------------- |
+| `*_v1f.config`                     | baseline 生产 config              |
+| `*_v1f_contrastive.config`         | 对比学习                          |
+| `*_v1f_weight.config`              | Loss 加权（默认 tiered）          |
+| `*_v1f_weight_binary_2x_5h.config` | Loss 加权（2x, \<5h）             |
+| `*_v1f_weight_binary_3x_2h.config` | Loss 加权（3x, \<2h）             |
+| `*_v1f_weight_binary_5x_1h.config` | Loss 加权（5x, \<1h）             |
+| `*_v1f_weight_tiered_v2.config`    | Loss 加权（\<0.5h→4x, 0.5-2h→2x） |
+| `*_v1f_combo.config`               | pub_hours × cate/price/brand      |
+
+### SQL / Pipeline 文件
+
+| 文件                                | 说明                                              |
+| ----------------------------------- | ------------------------------------------------- |
+| `sql/sample_v3/*_60d_v3.sql`        | 产出所有 fresh_weight + phour_x\_\* 列的 pipeline |
+| `sql/sample_v3/*_60d_v3_tae.sql`    | train/val 切分（当前为随机 99/1）                 |
+| `sql/sample_v3/*_pyfg_encoded_v3`   | FG 编码 runner（Python）                          |
+| `sql/sample_v3/*_fix_sample_v3.sql` | 基础宽表建表语句                                  |
+| `sql/sample_v3/*_fg_v3ff.json`      | FG 特征定义 JSON                                  |
