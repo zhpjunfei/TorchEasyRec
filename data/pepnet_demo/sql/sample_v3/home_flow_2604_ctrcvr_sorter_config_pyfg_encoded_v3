@@ -2,7 +2,7 @@ from pyfg101 import run_on_odps
 fg_task = run_on_odps.FgTask(
   'feature_mall_home_flow_2604_ctrcvr_sorter_v3_training_set',
   'home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_v3',
-  'home_flow_2604_ctrcvr_sorter_config_fg_v3ff.json',
+  'home_flow_2604_ctrcvr_sorter_config_fg_v3f2.json',
   args['bizdate'],
   force_delete_output_table=False,
   force_update_resource=False,

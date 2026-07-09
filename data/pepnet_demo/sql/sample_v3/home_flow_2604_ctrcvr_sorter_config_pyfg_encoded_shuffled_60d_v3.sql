@@ -4,22 +4,22 @@ set odps.sql.type.system.odps2=true;
 -- ==========================================
 -- 1. 创建训练集表和验证集表 (仅首次运行需要)
 -- ==========================================
-DROP TABLE IF EXISTS home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3;
-CREATE TABLE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3
-LIKE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_v3 LIFECYCLE 1;
-ALTER TABLE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3
-ADD COLUMNS (
-  search_weight DOUBLE,
-  fresh_weight DOUBLE,
-  fresh_weight_binary_2x_5h DOUBLE,
-  fresh_weight_binary_3x_2h DOUBLE,
-  fresh_weight_binary_5x_1h DOUBLE,
-  fresh_weight_tiered_v2 DOUBLE,
-  phour_x_cate STRING,
-  phour_x_price STRING,
-  phour_x_brand STRING,
-  isNewItem_fg ARRAY<STRING>
-);
+-- DROP TABLE IF EXISTS home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3;
+-- CREATE TABLE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3
+-- LIKE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_v3 LIFECYCLE 1;
+-- ALTER TABLE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v3
+-- ADD COLUMNS (
+--   search_weight DOUBLE,
+--   fresh_weight DOUBLE,
+--   fresh_weight_binary_2x_5h DOUBLE,
+--   fresh_weight_binary_3x_2h DOUBLE,
+--   fresh_weight_binary_5x_1h DOUBLE,
+--   fresh_weight_tiered_v2 DOUBLE,
+--   phour_x_cate STRING,
+--   phour_x_price STRING,
+--   phour_x_brand STRING,
+--   isnewitem_fg ARRAY<STRING>
+-- );
 
 
 
@@ -94,7 +94,7 @@ END AS fresh_weight_tiered_v2
 ,ARRAY(CASE
   WHEN pub_hours IS NOT NULL AND pub_hours >= 0 AND pub_hours < 5.0 THEN '1'
   ELSE '0'
-END) AS isNewItem_fg
+END) AS isnewitem_fg
 WHERE   dt > TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'), -60, 'dd'), 'yyyymmdd')
 AND     dt <= '${bdp.system.bizdate}'
 -- AND     (ARRAY_CONTAINS(f_req_page, '1w_tab_f_index_content') OR ARRAY_CONTAINS(f_req_page, '1zhekoutuijian'))

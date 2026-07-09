@@ -1,6 +1,15 @@
 SET odps.namespace.schema = true;
 
 -- DROP TABLE IF EXISTS feature_mall_home_flow_2604_ctrcvr_sorter_v3_training_set;
+-- ALTER TABLE mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v2_training_set DROP COLUMNS (
+--     click_10_seq__title_vector,
+--     click_50_seq__title_vector,
+--     conversion_5_seq__title_vector,
+--     conversion_20_seq__title_vector,
+--     favorite_5_seq__title_vector,
+--     favorite_10_seq__title_vector
+-- );
+-- ALTER TABLE mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3_training_set SET lifecycle 14;
 CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3_training_set
 (
     event_unix_time                                                  BIGINT
@@ -782,7 +791,7 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3
     ,click_10_seq__dianpufensi                                       STRING
     ,click_10_seq__item_type                                         STRING
     ,click_10_seq__username                                          STRING
-    ,click_10_seq__title_vector                                      STRING
+    -- ,click_10_seq__title_vector                                      STRING
     ,click_10_seq__ts                                                STRING
     ,click_50_seq__item_id                                           STRING
     ,click_50_seq__cate_id_path                                      STRING
@@ -803,7 +812,7 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3
     ,click_50_seq__dianpufensi                                       STRING
     ,click_50_seq__item_type                                         STRING
     ,click_50_seq__username                                          STRING
-    ,click_50_seq__title_vector                                      STRING
+    -- ,click_50_seq__title_vector                                      STRING
     ,click_50_seq__ts                                                STRING
     ,conversion_5_seq__item_id                                       STRING
     ,conversion_5_seq__cate_id_path                                  STRING
@@ -824,7 +833,7 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3
     ,conversion_5_seq__dianpufensi                                   STRING
     ,conversion_5_seq__item_type                                     STRING
     ,conversion_5_seq__username                                      STRING
-    ,conversion_5_seq__title_vector                                  STRING
+    -- ,conversion_5_seq__title_vector                                  STRING
     ,conversion_5_seq__ts                                            STRING
     ,conversion_20_seq__item_id                                      STRING
     ,conversion_20_seq__cate_id_path                                 STRING
@@ -845,7 +854,7 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3
     ,conversion_20_seq__dianpufensi                                  STRING
     ,conversion_20_seq__item_type                                    STRING
     ,conversion_20_seq__username                                     STRING
-    ,conversion_20_seq__title_vector                                 STRING
+    -- ,conversion_20_seq__title_vector                                 STRING
     ,conversion_20_seq__ts                                           STRING
     ,favorite_5_seq__item_id                                         STRING
     ,favorite_5_seq__cate_id_path                                    STRING
@@ -866,7 +875,7 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3
     ,favorite_5_seq__dianpufensi                                     STRING
     ,favorite_5_seq__item_type                                       STRING
     ,favorite_5_seq__username                                        STRING
-    ,favorite_5_seq__title_vector                                    STRING
+    -- ,favorite_5_seq__title_vector                                    STRING
     ,favorite_5_seq__ts                                              STRING
     ,favorite_10_seq__item_id                                        STRING
     ,favorite_10_seq__cate_id_path                                   STRING
@@ -887,7 +896,7 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2604_ctrcvr_sorter_v3
     ,favorite_10_seq__dianpufensi                                    STRING
     ,favorite_10_seq__item_type                                      STRING
     ,favorite_10_seq__username                                       STRING
-    ,favorite_10_seq__title_vector                                   STRING
+    -- ,favorite_10_seq__title_vector                                   STRING
     ,favorite_10_seq__ts                                             STRING
     ,pub_hours                                                       DOUBLE
     ,reg_days                                                        DOUBLE
@@ -1196,7 +1205,7 @@ PARTITIONED BY
 )
 STORED AS aliorc
 TBLPROPERTIES ('columnar.nested.type' = 'true')
-LIFECYCLE 90
+LIFECYCLE 14
 ;
 
 set odps.sql.hive.compatible=true;
@@ -1980,7 +1989,7 @@ SELECT  sq0.event_unix_time
         ,sq56.click_10_seq__dianpufensi
         ,sq56.click_10_seq__item_type
         ,sq56.click_10_seq__username
-        ,sq56.click_10_seq__title_vector
+        -- ,sq56.click_10_seq__title_vector
         ,sq56.click_10_seq__ts
         ,sq56.click_50_seq__item_id
         ,sq56.click_50_seq__cate_id_path
@@ -2001,7 +2010,7 @@ SELECT  sq0.event_unix_time
         ,sq56.click_50_seq__dianpufensi
         ,sq56.click_50_seq__item_type
         ,sq56.click_50_seq__username
-        ,sq56.click_50_seq__title_vector
+        -- ,sq56.click_50_seq__title_vector
         ,sq56.click_50_seq__ts
         ,sq56.conversion_5_seq__item_id
         ,sq56.conversion_5_seq__cate_id_path
@@ -2022,7 +2031,7 @@ SELECT  sq0.event_unix_time
         ,sq56.conversion_5_seq__dianpufensi
         ,sq56.conversion_5_seq__item_type
         ,sq56.conversion_5_seq__username
-        ,sq56.conversion_5_seq__title_vector
+        -- ,sq56.conversion_5_seq__title_vector
         ,sq56.conversion_5_seq__ts
         ,sq56.conversion_20_seq__item_id
         ,sq56.conversion_20_seq__cate_id_path
@@ -2043,7 +2052,7 @@ SELECT  sq0.event_unix_time
         ,sq56.conversion_20_seq__dianpufensi
         ,sq56.conversion_20_seq__item_type
         ,sq56.conversion_20_seq__username
-        ,sq56.conversion_20_seq__title_vector
+        -- ,sq56.conversion_20_seq__title_vector
         ,sq56.conversion_20_seq__ts
         ,sq56.favorite_5_seq__item_id
         ,sq56.favorite_5_seq__cate_id_path
@@ -2064,7 +2073,7 @@ SELECT  sq0.event_unix_time
         ,sq56.favorite_5_seq__dianpufensi
         ,sq56.favorite_5_seq__item_type
         ,sq56.favorite_5_seq__username
-        ,sq56.favorite_5_seq__title_vector
+        -- ,sq56.favorite_5_seq__title_vector
         ,sq56.favorite_5_seq__ts
         ,sq56.favorite_10_seq__item_id
         ,sq56.favorite_10_seq__cate_id_path
@@ -2085,7 +2094,7 @@ SELECT  sq0.event_unix_time
         ,sq56.favorite_10_seq__dianpufensi
         ,sq56.favorite_10_seq__item_type
         ,sq56.favorite_10_seq__username
-        ,sq56.favorite_10_seq__title_vector
+        -- ,sq56.favorite_10_seq__title_vector
         ,sq56.favorite_10_seq__ts
         ,round((sq0.event_unix_time - sq55.pub_time) / 3600.0,2) AS pub_hours
         ,round(
