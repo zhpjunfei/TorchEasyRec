@@ -104,7 +104,7 @@ LEFT JOIN (
                 ,ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY fs_write_time DESC) AS write_order
         FROM    feature_mall_feed_rec_flow_item_title_embedding_v5_offline
         WHERE   dt >= '20260604'
-        AND     dt <= TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-1,'dd'),'yyyymmdd')
+        AND     dt <= '${bdp.system.bizdate}'
         AND     title_vector IS NOT NULL
     ) t
     WHERE   write_order = 1 -- 取每个 item_id 最新的一条 embedding
