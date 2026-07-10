@@ -1,9 +1,11 @@
+exclude = ["data/pepnet_demo/sql/sample_v3/home_flow_2604_pepnet_sorter_train_export.py"]
 lint.select = ["B", "D", "E", "F", "W", "B9", "I"]
 lint.ignore = ["D100", "D104", "D105", "D107", "B905"]
 
 [lint.per-file-ignores]
 "*_test.py" = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
 "**/ops/**.py" = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
+"data/pepnet_demo/**/*.py" = ["E", "F", "W"]
 
 [lint.pydocstyle]
 convention = "google"
