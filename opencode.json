@@ -1,6 +1,12 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "contextPaths": [
+  "instructions": [
     "AGENTS.md"
-  ]
+  ],
+  "references": {
+    "agents": {
+      "path": "AGENTS.md",
+      "description": "Agent instructions for this project"
+    }
+  }
 }

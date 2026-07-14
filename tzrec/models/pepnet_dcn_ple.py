@@ -19,6 +19,7 @@ from torch import nn
 from tzrec.datasets.utils import Batch
 from tzrec.features.feature import BaseFeature
 from tzrec.models.multi_task_rank import MultiTaskRank
+from tzrec.modules.afp.afp_net import AFPModule
 from tzrec.modules.cdot import CDOT
 from tzrec.modules.extraction_net import ExtractionNet
 from tzrec.modules.interaction import CrossV2
@@ -224,6 +225,48 @@ class PEPNetDCNPLE(MultiTaskRank):
         else:
             self._lhuc_group_dim = 0
             self.epnet = None
+        # --- AFP (Automatic Feature Partitioning) ---
+        self._afp_enabled = self._model_config.afp_enabled
+        if self._afp_enabled and self.embedding_group.has_group(self._lhuc_group_name):
+            self._afp_mode = (
+                self._model_config.afp_mode
+                if self._model_config.afp_mode
+                else "feature_wise"
+            )
+            self._afp_hidden_units = (
+                list(self._model_config.afp_hidden_units)
+                if self._model_config.afp_hidden_units
+                else [64, 32]
+            )
+            self._afp_temperature = (
+                self._model_config.afp_temperature
+                if self._model_config.HasField("afp_temperature")
+                else 1.0
+            )
+            self._afp_min_temperature = (
+                self._model_config.afp_min_temperature
+                if self._model_config.HasField("afp_min_temperature")
+                else 0.1
+            )
+            self._afp_gate_temperature = (
+                self._model_config.afp_gate_temperature
+                if self._model_config.HasField("afp_gate_temperature")
+                else 0.0
+            )
+            # Build feature dims list for AFP (order matches lhuc group)
+            self._afp_feature_dims = list(
+                self.embedding_group.group_feature_dims(self._lhuc_group_name).values()
+            )
+            self.afp_module = AFPModule(
+                feature_dims=self._afp_feature_dims,
+                mode=self._afp_mode,
+                hidden_units=self._afp_hidden_units,
+                temperature=self._afp_temperature,
+                min_temperature=self._afp_min_temperature,
+                gate_temperature=self._afp_gate_temperature,
+            )
+        else:
+            self.afp_module = None
 
         # --- PLE ExtractionNet layers ---
         self._extraction_nets = nn.ModuleList()
@@ -490,11 +533,28 @@ class PEPNetDCNPLE(MultiTaskRank):
             concat_parts.append(self.component_ln["tag_seq"](tag_seq_out))
         deep_input = torch.cat(concat_parts, dim=1)
 
-        # --- EPNet (LHUC) personalization ---
-        if self.epnet is not None:
+        # --- AFP partitioning (before EPNet) ---
+        gate_input_for_ppnet = None
+        if self._afp_enabled and self.afp_module is not None:
             lhuc_features = grouped_features[self._lhuc_group_name]
-            ep_scale = self.epnet(lhuc_features)
+            afp_result = self.afp_module(lhuc_features, hard_selection=False)
+            gate_input_for_ppnet = afp_result["gate_input"]
+            dnn_input_for_epnet = afp_result["dnn_input"]
+        else:
+            dnn_input_for_epnet = None  # will use raw lhuc_features below
+
+        # --- EPNet (LHUC) personalization with AFP partitioning ---
+        if self.epnet is not None:
+            if self._afp_enabled and gate_input_for_ppnet is not None:
+                ep_scale = self.epnet(dnn_input_for_epnet)
+            else:
+                lhuc_features = grouped_features[self._lhuc_group_name]
+                ep_scale = self.epnet(lhuc_features)
             deep_input = deep_input * ep_scale
+
+        # Ensure gate_input_for_ppnet falls back to lhuc_features when AFP is disabled
+        if gate_input_for_ppnet is None:
+            gate_input_for_ppnet = grouped_features[self._lhuc_group_name]
 
         # --- PLE ExtractionNet layers ---
         extraction_network_fea = [deep_input] * len(self._task_tower_cfgs)
@@ -505,7 +565,7 @@ class PEPNetDCNPLE(MultiTaskRank):
             )
 
         # --- LHUC_PPNet towers ---
-        lhuc_input = lhuc_features if self.epnet is not None else deep_input
+        lhuc_input = gate_input_for_ppnet
         tower_hidden = {}
         for i, task_tower_cfg in enumerate(self._task_tower_cfgs):
             tower_name = task_tower_cfg.tower_name
@@ -590,6 +650,11 @@ class PEPNetDCNPLE(MultiTaskRank):
                 predictions["_ctr_seq_len"] = seq_len
 
         return predictions
+
+    def anneal_temperature(self, step: int, total_steps: int) -> None:
+        """Anneal AFP temperature during training. Call from trainer loop."""
+        if self._afp_enabled and self.afp_module is not None:
+            self.afp_module.anneal_temperature(step, total_steps)
 
     def loss(
         self, predictions: Dict[str, torch.Tensor], batch: Batch

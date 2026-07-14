@@ -215,4 +215,20 @@ message PEPNetDCNPLE {
     //   "bidirectional" = Phase 2: bidirectional row+column alignment
     //   "row"           = single-side row alignment (semantics → behavior), reserved
     optional string contrastive_alignment_mode = 19 [default = "column"];
+
+    // ==========================================
+    // AFP: Automatic Feature Partitioning (APPNet)
+    // ==========================================
+    // whether to enable AFP for PPNet gate input
+    optional bool afp_enabled = 20 [default = false];
+    // AFP mode: "feature_wise" or "bit_wise"
+    optional string afp_mode = 21 [default = "feature_wise"];
+    // AFP classifier hidden units
+    repeated uint32 afp_hidden_units = 22;
+    // AFP temperature for Gumbel-softmax (annealed during training)
+    optional float afp_temperature = 23 [default = 1.0];
+    // AFP minimum temperature (after annealing)
+    optional float afp_min_temperature = 24 [default = 0.1];
+    // AFP gate temperature (separate from DNN temperature)
+    optional float afp_gate_temperature = 25 [default = 0.0];
 }

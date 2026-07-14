@@ -442,6 +442,11 @@ def _train_and_evaluate(
                     dataloader_state, batch.checkpoint_info
                 )
                 _model.update_train_metric(predictions, batch)
+
+                # --- AFP temperature annealing (APPNet) ---
+                if use_step and hasattr(_model, "anneal_temperature"):
+                    _model.anneal_temperature(i_step, train_config.num_steps)
+
                 if i_step % train_config.log_step_count_steps == 0:
                     train_metrics = _model.compute_train_metric()
                     _log_train(
