@@ -451,7 +451,7 @@ def _train_and_evaluate(
                         and _model.afp_module is not None
                         and i_step % train_config.log_step_count_steps == 0
                     ):
-                        _afp_temp = _model.afp_module._current_temp.item()
+                        _afp_temp = _model.afp_module.current_temperature()
                         plogger.log_scalar("afp_temperature", _afp_temp, i_step)
 
                 if i_step % train_config.log_step_count_steps == 0:

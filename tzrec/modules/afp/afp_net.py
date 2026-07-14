@@ -97,10 +97,17 @@ class AFPModule(nn.Module):
         self._rng.seed()  # Initialize with a random seed from OS entropy
 
         # Pre-compute bit-to-feature mapping for BIT_WISE (avoids O(n^2) lookup)
-        self._bit_to_feat = []
-        for fi, dim_i in enumerate(self.feature_dims):
-            self._bit_to_feat.extend([fi] * dim_i)
-        self._bit_to_feat = torch.tensor(self._bit_to_feat, dtype=torch.long)
+        self.register_buffer(
+            "_bit_to_feat",
+            torch.tensor(
+                [
+                    fi
+                    for fi, dim_i in enumerate(self.feature_dims)
+                    for _ in range(dim_i)
+                ],
+                dtype=torch.long,
+            ),
+        )
 
     def _build_feature_wise(self, hidden_units: List[int] = None) -> None:
         """Feature-wise AFP: one classifier per feature field."""
@@ -156,6 +163,10 @@ class AFPModule(nn.Module):
                 self.min_temperature
                 + (self.gate_temperature - self.min_temperature) * (1.0 - progress)
             )
+
+    def current_temperature(self) -> float:
+        """Return current annealed temperature (public getter for logging)."""
+        return self._current_temp.item()
 
     def set_rng_seed(self, seed: int) -> None:
         """Set the RNG seed for reproducible Gumbel noise.
