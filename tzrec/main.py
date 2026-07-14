@@ -414,6 +414,10 @@ def _train_and_evaluate(
         if plogger is not None:
             plogger.set_description(f"Training Epoch {i_epoch}")
 
+        # Seed AFP RNG per epoch for reproducibility
+        if hasattr(model, "afp_module") and model.afp_module is not None:
+            model.afp_module.set_rng_seed(hash(i_epoch) & 0xFFFFFFFF)
+
         train_iterator = iter(train_dataloader)
 
         # Restore model and optimizer checkpoint

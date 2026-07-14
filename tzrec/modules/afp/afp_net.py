@@ -94,6 +94,7 @@ class AFPModule(nn.Module):
 
         # Deterministic RNG for reproducible Gumbel noise
         self._rng = torch.Generator()
+        self._rng.seed()  # Initialize with a random seed from OS entropy
 
         # Pre-compute bit-to-feature mapping for BIT_WISE (avoids O(n^2) lookup)
         self._bit_to_feat = []
@@ -155,6 +156,14 @@ class AFPModule(nn.Module):
                 self.min_temperature
                 + (self.gate_temperature - self.min_temperature) * (1.0 - progress)
             )
+
+    def set_rng_seed(self, seed: int) -> None:
+        """Set the RNG seed for reproducible Gumbel noise.
+
+        Call this before each training epoch to ensure deterministic
+        noise across epochs (e.g., from the trainer's epoch seed).
+        """
+        self._rng.manual_seed(seed)
 
     def forward(
         self,
