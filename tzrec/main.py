@@ -416,7 +416,7 @@ def _train_and_evaluate(
 
         # Seed AFP RNG per epoch for reproducibility
         if hasattr(model, "afp_module") and model.afp_module is not None:
-            model.afp_module.set_rng_seed(hash(i_epoch) & 0xFFFFFFFF)
+            model.afp_module.set_rng_seed(42)
 
         train_iterator = iter(train_dataloader)
 
