@@ -415,8 +415,12 @@ def _train_and_evaluate(
             plogger.set_description(f"Training Epoch {i_epoch}")
 
         # Seed AFP RNG per epoch for reproducibility
+        # Use same seed resolution as dataset.py: EVAL_SEED -> TORCH_MANUAL_SEED -> 42
         if hasattr(model, "afp_module") and model.afp_module is not None:
-            model.afp_module.set_rng_seed(42)
+            _eval_seed = int(os.environ.get("EVAL_SEED", "0"))
+            _torch_seed = int(os.environ.get("TORCH_MANUAL_SEED", "42"))
+            _seed = _eval_seed or _torch_seed
+            model.afp_module.set_rng_seed(_seed)
 
         train_iterator = iter(train_dataloader)
 
