@@ -14,6 +14,8 @@ message MLP {
     optional bool bias = 5 [default = true];
     // use layer normalization
     optional bool use_ln = 6 [default = false];
+    // use layer norm inside Dice activation (only affects Dice)
+    optional bool activation_use_layer_norm = 7 [default = false];
 }
 
 message ExtractionNetwork {

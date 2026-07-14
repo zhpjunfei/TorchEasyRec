@@ -446,6 +446,13 @@ def _train_and_evaluate(
                 # --- AFP temperature annealing (APPNet) ---
                 if use_step and hasattr(_model, "anneal_temperature"):
                     _model.anneal_temperature(i_step, train_config.num_steps)
+                    if (
+                        hasattr(_model, "afp_module")
+                        and _model.afp_module is not None
+                        and i_step % train_config.log_step_count_steps == 0
+                    ):
+                        _afp_temp = _model.afp_module._current_temp.item()
+                        plogger.log_scalar("afp_temperature", _afp_temp, i_step)
 
                 if i_step % train_config.log_step_count_steps == 0:
                     train_metrics = _model.compute_train_metric()

@@ -229,6 +229,6 @@ message PEPNetDCNPLE {
     optional float afp_temperature = 23 [default = 1.0];
     // AFP minimum temperature (after annealing)
     optional float afp_min_temperature = 24 [default = 0.1];
-    // AFP gate temperature (separate from DNN temperature)
+    // AFP gate temperature (0.0 = same as afp_temperature).
     optional float afp_gate_temperature = 25 [default = 0.0];
 }

@@ -92,6 +92,15 @@ class AFPModule(nn.Module):
             "_current_gate_temp", torch.tensor(gate_temperature or temperature)
         )
 
+        # Deterministic RNG for reproducible Gumbel noise
+        self._rng = torch.Generator()
+
+        # Pre-compute bit-to-feature mapping for BIT_WISE (avoids O(n^2) lookup)
+        self._bit_to_feat = []
+        for fi, dim_i in enumerate(self.feature_dims):
+            self._bit_to_feat.extend([fi] * dim_i)
+        self._bit_to_feat = torch.tensor(self._bit_to_feat, dtype=torch.long)
+
     def _build_feature_wise(self, hidden_units: List[int] = None) -> None:
         """Feature-wise AFP: one classifier per feature field."""
         if hidden_units is None:
@@ -175,6 +184,12 @@ class AFPModule(nn.Module):
                 torch.cumsum(torch.tensor([0] + self.feature_dims), dim=0).tolist()
             )[:-1]
 
+        # Validate input tensor dimension matches feature_dims sum
+        assert features.size(1) == self._total_dim, (
+            f"AFP input dim {features.size(1)} does not match "
+            f"expected {self._total_dim} (sum of feature_dims)"
+        )
+
         if self.mode == AFPMode.FEATURE_WISE:
             partition_probs = []
             for i, classifier in enumerate(self.classifiers):
@@ -184,7 +199,8 @@ class AFPModule(nn.Module):
                 logit = classifier(feat)  # [B, 1]
                 # Gumbel-softmax: add Gumbel(0,1) noise scaled by temperature
                 if self.training:
-                    gumbel = -torch.log(-torch.log(torch.rand_like(logit)) + 1e-10)
+                    noise = torch.rand_like(logit, generator=self._rng)
+                    gumbel = -torch.log(-torch.log(noise) + 1e-10)
                     noisy_logit = (logit + gumbel) / max(
                         self._current_temp.item(), 1e-6
                     )
@@ -200,26 +216,17 @@ class AFPModule(nn.Module):
             # Each bit classifies its own scalar dimension directly.
             bit_probs = []
             for bit_idx, classifier in enumerate(self.bit_classifiers):
-                # Find which feature this bit belongs to
-                feat_idx = 0
-                for fi in range(self.num_features):
-                    end = self.bit_offsets[fi] + self.feature_dims[fi]
-                    if self.bit_offsets[fi] <= bit_idx < end:
-                        feat_idx = fi
-                        break
+                feat_idx = self._bit_to_feat[bit_idx].item()
                 feat_start = self.bit_offsets[feat_idx]
-                bit_offset_in_feat = bit_idx - self.bit_offsets[feat_idx]
+                bit_offset_in_feat = bit_idx - feat_start
                 # Extract this single bit's dimension
-                bit_val = features[
-                    :,
-                    feat_start + bit_offset_in_feat : feat_start
-                    + bit_offset_in_feat
-                    + 1,
-                ]  # [B, 1]
+                bit_start = feat_start + bit_offset_in_feat
+                bit_val = features[:, bit_start : bit_start + 1]  # [B, 1]
                 logit = classifier(bit_val)  # [B, 1]
                 # Gumbel-softmax with temperature
                 if self.training:
-                    gumbel = -torch.log(-torch.log(torch.rand_like(logit)) + 1e-10)
+                    noise = torch.rand_like(logit, generator=self._rng)
+                    gumbel = -torch.log(-torch.log(noise) + 1e-10)
                     noisy_logit = (logit + gumbel) / max(
                         self._current_temp.item(), 1e-6
                     )
@@ -286,8 +293,9 @@ class AFPModule(nn.Module):
             "dnn_mask": dnn_mask,
         }
 
+    @torch.no_grad()
     def get_partition_summary(self, partition_prob: torch.Tensor) -> Dict[str, float]:
-        """Get human-readable partition statistics for monitoring."""
+        """Return partition statistics without gradient tracking."""
         dnn_ratio = partition_prob.mean().item()
         gate_ratio = (1.0 - partition_prob).mean().item()
         return {
