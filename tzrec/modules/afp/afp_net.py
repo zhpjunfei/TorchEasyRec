@@ -219,7 +219,12 @@ class AFPModule(nn.Module):
                 logit = classifier(feat)  # [B, 1]
                 # Gumbel-softmax: add Gumbel(0,1) noise scaled by temperature
                 if self.training:
-                    noise = torch.rand_like(logit, generator=self._rng)
+                    noise = torch.rand(
+                        logit.shape,
+                        dtype=logit.dtype,
+                        device=logit.device,
+                        generator=self._rng,
+                    )
                     gumbel = -torch.log(-torch.log(noise) + 1e-10)
                     noisy_logit = (logit + gumbel) / max(
                         self._current_temp.item(), 1e-6
@@ -245,7 +250,12 @@ class AFPModule(nn.Module):
                 logit = classifier(bit_val)  # [B, 1]
                 # Gumbel-softmax with temperature
                 if self.training:
-                    noise = torch.rand_like(logit, generator=self._rng)
+                    noise = torch.rand(
+                        logit.shape,
+                        dtype=logit.dtype,
+                        device=logit.device,
+                        generator=self._rng,
+                    )
                     gumbel = -torch.log(-torch.log(noise) + 1e-10)
                     noisy_logit = (logit + gumbel) / max(
                         self._current_temp.item(), 1e-6
