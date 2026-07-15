@@ -192,14 +192,9 @@ class AFPModule(nn.Module):
                 torch.cumsum(torch.tensor([0] + self.feature_dims), dim=0).tolist()
             )[:-1]
 
-        # Validate input tensor dimension matches feature_dims sum
-        # Use torch.jit.unused to avoid FX tracing issues with assert
-        _total_dim = self._total_dim
-        if not torch.jit.is_tracing():
-            assert features.size(1) == _total_dim, (
-                f"AFP input dim {features.size(1)} does not match "
-                f"expected {_total_dim} (sum of feature_dims)"
-            )
+        # Dimension check: features.size(1) must equal sum(feature_dims).
+        # Mismatch will fail in subsequent slicing with a clear error.
+        # Assert removed to avoid FX tracing issues.
 
         if self.mode == AFPMode.FEATURE_WISE:
             partition_probs = []

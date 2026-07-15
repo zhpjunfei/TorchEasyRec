@@ -420,8 +420,8 @@ class TransformerEncoder(SequenceEncoder):
     """Transformer-based target-aware sequence encoder.
 
     Architecture:
-        s -> proj_in -> TransformerEncoder -> h
-        q -> proj_in -> cross-attention(q, h) -> attended
+        s -> proj_in_s -> TransformerEncoder -> h
+        q -> proj_in_q -> cross-attention(q, h) -> attended
         gate = sigmoid(MLP([q_proj, attended, q⊙attended])) -> [B,128]
         fused = attended*gate + mean(h)*(1-gate)
         output = LN(fused) -> proj_pooled -> [B,216]
@@ -434,7 +434,8 @@ class TransformerEncoder(SequenceEncoder):
 
     Key design points:
     1. No target leakage: Transformer sees only s, not s+q.
-    2. Shared proj_in: q_proj and h in same linear space for clean dot-product.
+    2. Separate proj_in: q and s use different projections, allowing different
+       query_dim and sequence_dim per sequence type.
     3. Vector gate [B,128]: per-dim blend of attended and mean(h).
     4. Gate ignores mean(h): avoids double injection with the (1-g) fused path.
     5. LN on fused only: no extra residual that could wash the gating signal.
@@ -469,18 +470,13 @@ class TransformerEncoder(SequenceEncoder):
         self._num_heads = num_heads
         self._max_seq_length = max_seq_length
 
-        assert query_dim == sequence_dim, (
-            f"TransformerEncoder requires query_dim ({query_dim}) == "
-            f"sequence_dim ({sequence_dim}) because proj_in is shared "
-            "between sequence and query paths."
-        )
-
         self._query_name = f"{input}.query"
         self._sequence_name = f"{input}.sequence"
         self._sequence_length_name = f"{input}.sequence_length"
 
-        # Project sequence (sequence_dim) to transformer_hidden
-        self._proj_in = nn.Linear(sequence_dim, transformer_hidden)
+        # Project query and sequence separately (support different dims)
+        self._proj_in_q = nn.Linear(query_dim, transformer_hidden)
+        self._proj_in_s = nn.Linear(sequence_dim, transformer_hidden)
         self._dropout_in = nn.Dropout(dropout)
 
         # Transformer encoder layer
@@ -500,7 +496,7 @@ class TransformerEncoder(SequenceEncoder):
         self._transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
         # Cross-attention selection: q · h_i / √d
-        # proj_in is shared between Transformer path and query scoring path,
+        # proj_in_q and proj_in_s both project to transformer_hidden space,
         # ensuring q_proj and h live in the same linear space for clean dot-product.
 
         # Attention-aware gating: gate sees target-attention relation only
@@ -538,12 +534,12 @@ class TransformerEncoder(SequenceEncoder):
         ).unsqueeze(0) < sequence_length.unsqueeze(1)
 
         # ── Pure sequence encoding (no target leakage) ──
-        h = self._proj_in(sequence)
+        h = self._proj_in_s(sequence)
         h = self._dropout_in(h)
         h = self._transformer(h, src_key_padding_mask=~sequence_mask)
 
         # ── Cross-attention selection: q · h_i / √d ──
-        q_proj = self._proj_in(query).unsqueeze(1)
+        q_proj = self._proj_in_q(query).unsqueeze(1)
         scores = torch.matmul(q_proj, h.transpose(1, 2)) / (
             self._transformer_hidden**0.5
         )
@@ -555,7 +551,7 @@ class TransformerEncoder(SequenceEncoder):
         attended = torch.matmul(scores, h).squeeze(1)
 
         # ── Gated fusion ──
-        q_proj_2d = self._proj_in(query)
+        q_proj_2d = self._proj_in_q(query)
         seq_mean = h.mean(dim=1)
         gate = torch.sigmoid(
             self._gate_proj(

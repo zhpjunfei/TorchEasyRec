@@ -20,7 +20,7 @@ ______________________________________________________________________
 | v12  | \[[v12-experiments]\]             | 损失优化策略                         |  completed   |
 | v13  | \[[v13-experiments]\]             | 优化方向审核                         |  completed   |
 | v14  | \[[v14-experiments]\]             | out_task_space_weight 全扫描完结     | ✅ completed |
-| v14  | \[[v14-optimization-plan]\]       | 路线图（Round 1 更新）               |  🏃 active   |
+| v14  | \[[v14-optimization-plan]\]       | 路线图（Round 1，已被 codex 版取代） |  superseded  |
 | v15  | \[[v14-optimization-plan-codex]\] | Codex 深度审查版路线图（UV 级优化）  |    draft     |
 
 ## 基础设施实验
