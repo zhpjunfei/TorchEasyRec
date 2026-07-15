@@ -92,10 +92,6 @@ class AFPModule(nn.Module):
             "_current_gate_temp", torch.tensor(gate_temperature or temperature)
         )
 
-        # Deterministic RNG for reproducible Gumbel noise
-        self._rng = torch.Generator()
-        self._rng.seed()  # Initialize with a random seed from OS entropy
-
         # Pre-compute bit-to-feature mapping for BIT_WISE (avoids O(n^2) lookup)
         self.register_buffer(
             "_bit_to_feat",
@@ -168,14 +164,6 @@ class AFPModule(nn.Module):
         """Return current annealed temperature (public getter for logging)."""
         return self._current_temp.item()
 
-    def set_rng_seed(self, seed: int) -> None:
-        """Set the RNG seed for reproducible Gumbel noise.
-
-        Call this before each training epoch to ensure deterministic
-        noise across epochs (e.g., from the trainer's epoch seed).
-        """
-        self._rng.manual_seed(seed)
-
     def forward(
         self,
         features: torch.Tensor,
@@ -223,7 +211,6 @@ class AFPModule(nn.Module):
                         logit.shape,
                         dtype=logit.dtype,
                         device=logit.device,
-                        generator=self._rng,
                     )
                     gumbel = -torch.log(-torch.log(noise) + 1e-10)
                     noisy_logit = (logit + gumbel) / max(
@@ -254,7 +241,6 @@ class AFPModule(nn.Module):
                         logit.shape,
                         dtype=logit.dtype,
                         device=logit.device,
-                        generator=self._rng,
                     )
                     gumbel = -torch.log(-torch.log(noise) + 1e-10)
                     noisy_logit = (logit + gumbel) / max(
