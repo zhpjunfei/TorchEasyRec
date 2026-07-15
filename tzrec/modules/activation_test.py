@@ -40,6 +40,38 @@ class ActivationTest(unittest.TestCase):
         result = dice(input)
         self.assertEqual(result.size(), (4, 5, 16))
 
+    # --- BN/LN switch tests ---
+    _GRAPH_TYPES = [
+        [TestGraphType.NORMAL],
+        [TestGraphType.FX_TRACE],
+        [TestGraphType.JIT_SCRIPT],
+    ]
+
+    @parameterized.expand(_GRAPH_TYPES)
+    def test_dice_ln(self, graph_type) -> None:
+        dice = Dice(16, use_layer_norm=True)
+        dice = create_test_module(dice, graph_type)
+        input = torch.randn(4, 16)
+        result = dice(input)
+        self.assertEqual(result.size(), (4, 16))
+
+    @parameterized.expand(_GRAPH_TYPES)
+    def test_dice_seq_ln(self, graph_type) -> None:
+        dice = Dice(16, dim=3, use_layer_norm=True)
+        dice = create_test_module(dice, graph_type)
+        input = torch.randn(4, 5, 16)
+        result = dice(input)
+        self.assertEqual(result.size(), (4, 5, 16))
+
+    @parameterized.expand(_GRAPH_TYPES)
+    def test_dice_seq_bn(self, graph_type) -> None:
+        """Explicit test for BN mode with dim=3 (transpose path)."""
+        dice = Dice(16, dim=3, use_layer_norm=False)
+        dice = create_test_module(dice, graph_type)
+        input = torch.randn(4, 5, 16)
+        result = dice(input)
+        self.assertEqual(result.size(), (4, 5, 16))
+
     def test_create_activation(self):
         act_module = create_activation("nn.ReLU")
         self.assertEqual(act_module.__class__, torch.nn.ReLU)
@@ -47,6 +79,12 @@ class ActivationTest(unittest.TestCase):
         self.assertEqual(act_module.__class__, torch.nn.ReLU)
         act_module = create_activation("Dice", hidden_size=16, dim=3)
         self.assertEqual(act_module.__class__, Dice)
+        self.assertFalse(act_module.use_layer_norm)
+        act_module = create_activation(
+            "Dice", hidden_size=16, dim=3, use_layer_norm=True
+        )
+        self.assertEqual(act_module.__class__, Dice)
+        self.assertTrue(act_module.use_layer_norm)
         act_module = create_activation("nn.RReLU(lower=0.1)")
         self.assertEqual(act_module.__class__, torch.nn.RReLU)
         act_module = create_activation("torch.nn.MyReLU")

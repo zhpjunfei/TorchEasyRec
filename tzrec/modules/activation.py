@@ -22,30 +22,36 @@ from tzrec.utils.logging_util import logger
 class Dice(nn.Module):
     """Data Adaptive Activation Function in DIN.
 
-    Replaces BatchNorm1d with LayerNorm to avoid batch-statistics noise
-    in sequence modeling. Different sequence lengths (e.g. click_10_seq
-    with T=10 and click_50_seq with T=50) sharing the same BN statistics
-    causes normalization distortion. LayerNorm computes per-sample
-    normalization over the feature dimension, which is stable regardless
-    of sequence length and consistent between training and evaluation
-    modes (no running_mean/running_var drift).
+    Supports both BatchNorm1d and LayerNorm for the adaptive probability
+    computation. LayerNorm avoids batch-statistics noise in sequence
+    modeling where different sequence lengths (e.g. T=5/10/20/50) sharing
+    the same BN statistics causes normalization distortion.
 
     Args:
         hidden_size (int): hidden dim of input.
-        dim: input dims (2 for standard MLP, 3 for sequence features).
+        dim (int): input dims. ``2`` for standard MLP ``[B, D]``,
+            ``3`` for sequence features ``[B, T, D]``.
+        use_layer_norm (bool): if True, use LayerNorm instead of the
+            default BatchNorm1d for computing adaptive probabilities.
     """
 
     def __init__(
         self,
         hidden_size: int,
         dim: int = 2,
+        use_layer_norm: bool = False,
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
-        assert dim in [2, 3]
-        self.ln = nn.LayerNorm(hidden_size)
+        if dim not in (2, 3):
+            raise ValueError(f"dim must be 2 or 3, got {dim}")
+        self.use_layer_norm = use_layer_norm
+        if use_layer_norm:
+            self.norm = nn.LayerNorm(hidden_size)
+        else:
+            self.bn = nn.BatchNorm1d(hidden_size, affine=False)
         # pyre-ignore [6]
         self.alpha = nn.Parameter(torch.empty((hidden_size,), **factory_kwargs))
         self.dim = dim
@@ -56,15 +62,28 @@ class Dice(nn.Module):
         nn.init.zeros_(self.alpha)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward the module."""
+        """Apply Dice activation with adaptive probability weighting.
+
+        ``use_layer_norm=False`` uses BatchNorm1d (default),
+        ``use_layer_norm=True`` uses LayerNorm.
+        """
         if self.dim == 2:
-            x_p = F.sigmoid(self.ln(x))
+            if self.use_layer_norm:
+                x_p = F.sigmoid(self.norm(x))
+            else:
+                x_p = F.sigmoid(self.bn(x))
             out = self.alpha * (1 - x_p) * x + x_p * x
         else:
-            # dim=3: x is [B, T, D], LN normalizes over D (last dim)
-            # No transpose needed — unlike BN1d which normalizes dim=1
-            x_p = F.sigmoid(self.ln(x))
-            out = self.alpha.unsqueeze(0).unsqueeze(0) * (1 - x_p) * x + x_p * x
+            if self.use_layer_norm:
+                # dim=3: x is [B, T, D], LN normalizes over D (last dim)
+                # No transpose needed — unlike BN1d which normalizes dim=1
+                x_p = F.sigmoid(self.norm(x))
+                out = self.alpha.view(1, 1, -1) * (1 - x_p) * x + x_p * x
+            else:
+                x = x.transpose(1, 2)
+                x_p = F.sigmoid(self.bn(x))
+                out = self.alpha.view(1, -1, 1) * (1 - x_p) * x + x_p * x
+                out = out.transpose(1, 2)
         return out
 
 
@@ -79,7 +98,8 @@ def create_activation(act_str: str = "nn.ReLU", **kwargs: Any) -> Optional[nn.Mo
         )
         hidden_size = kwargs["hidden_size"]
         dim = kwargs["dim"]
-        act_module = Dice(hidden_size, dim)
+        use_layer_norm = kwargs.get("use_layer_norm", False)
+        act_module = Dice(hidden_size, dim, use_layer_norm)
     elif len(act_str) > 0:
         act_strs = act_str.strip(")").split("(", 1)
 

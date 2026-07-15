@@ -32,6 +32,8 @@ class Perceptron(nn.Module):
         dropout_ratio (float): dropout ratio of the layer.
         use_ln (bool): use layer norm or not.
         dim (int): input dims.
+        activation_use_layer_norm (bool): if True, Dice activation uses
+            LayerNorm instead of the default BatchNorm1d.
     """
 
     def __init__(
@@ -44,6 +46,7 @@ class Perceptron(nn.Module):
         dropout_ratio: float = 0.0,
         use_ln: bool = False,
         dim: int = 2,
+        activation_use_layer_norm: bool = False,
     ) -> None:
         super().__init__()
         self.activation = activation
@@ -69,7 +72,10 @@ class Perceptron(nn.Module):
             self.perceptron.append(nn.LayerNorm(out_features))
         if activation and len(activation) > 0:
             act_module = create_activation(
-                activation, hidden_size=out_features, dim=dim
+                activation,
+                hidden_size=out_features,
+                dim=dim,
+                use_layer_norm=activation_use_layer_norm,
             )
             if act_module:
                 self.perceptron.append(act_module)
@@ -98,6 +104,8 @@ class MLP(nn.Module):
         use_ln (bool): use layer_norm or not.
         dim (int): input dims.
         return_hidden_layer_feature (bool): output hidden layer or not.
+        activation_use_layer_norm (bool): if True, Dice activation uses
+            LayerNorm instead of the default BatchNorm1d.
     """
 
     def __init__(
@@ -111,6 +119,7 @@ class MLP(nn.Module):
         use_ln: bool = False,
         dim: int = 2,
         return_hidden_layer_feature: bool = False,
+        activation_use_layer_norm: bool = False,
     ) -> None:
         super().__init__()
         self.hidden_units = hidden_units
@@ -151,6 +160,7 @@ class MLP(nn.Module):
                     use_ln=use_ln,
                     dropout_ratio=dropout_ratio[i],
                     dim=dim,
+                    activation_use_layer_norm=activation_use_layer_norm,
                 )
             )
 
