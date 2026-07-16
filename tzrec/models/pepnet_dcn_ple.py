@@ -685,8 +685,12 @@ class PEPNetDCNPLE(MultiTaskRank):
             for tower_name in self._tower_to_scaler_idx:
                 idx = self._tower_to_scaler_idx[tower_name]
                 t = self._temperature_scalers[idx].get_temperature()
+                # Skip FX tracing: Proxy does not support .item() or f-string
+                if isinstance(t, torch.fx.Proxy):
+                    break
                 temps.append(f"{tower_name}={t.item():.4f}")
-            predictions["_calibration_temps"] = "; ".join(temps)
+            if temps:
+                predictions["_calibration_temps"] = "; ".join(temps)
 
         if (
             self.training
@@ -745,6 +749,9 @@ class PEPNetDCNPLE(MultiTaskRank):
                     self._tower_to_scaler_idx[tower_name]
                 ]
                 temp = scaler.get_temperature()
+                # Skip FX tracing — Proxy does not support .item()
+                if isinstance(temp, torch.fx.Proxy):
+                    break
                 calib_temps.append(f"{tower_name}:{temp.item():.4f}")
                 # Get probs and labels for this task
                 probs_key = f"probs_{tower_name}"
@@ -752,6 +759,9 @@ class PEPNetDCNPLE(MultiTaskRank):
                 if probs_key not in predictions or label_key not in batch.labels:
                     continue
                 task_probs = predictions[probs_key]
+                # Skip if probs is a Proxy (FX tracing in progress)
+                if isinstance(task_probs, torch.fx.Proxy):
+                    break
                 task_labels = batch.labels[label_key]
                 task_weight = None
                 if task_tower_cfg.HasField("sample_weight_name"):
