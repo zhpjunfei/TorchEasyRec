@@ -3,6 +3,8 @@ lint.select = ["B", "D", "E", "F", "W", "B9", "I"]
 lint.ignore = ["D100", "D104", "D105", "D107", "B905"]
 
 [lint.per-file-ignores]
+"tzrec/modules/calibration.py" = ["D415", "B008", "D301", "E501"]
+"tzrec/modules/calibration_test.py" = ["D415"]
 "*_test.py" = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
 "**/ops/**.py" = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
 "data/pepnet_demo/**/*.py" = ["E", "F", "W"]

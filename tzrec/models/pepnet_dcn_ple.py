@@ -20,6 +20,10 @@ from tzrec.datasets.utils import Batch
 from tzrec.features.feature import BaseFeature
 from tzrec.models.multi_task_rank import MultiTaskRank
 from tzrec.modules.afp.afp_net import AFPModule
+from tzrec.modules.calibration import (
+    compute_soft_ece,
+    create_temperature_scalers,
+)
 from tzrec.modules.cdot import CDOT
 from tzrec.modules.extraction_net import ExtractionNet
 from tzrec.modules.interaction import CrossV2
@@ -448,6 +452,51 @@ class PEPNetDCNPLE(MultiTaskRank):
         else:
             self.contrastive_title_adapter = None
 
+        # --- Temperature Calibration (CaliCausalRank-inspired) ---
+        self._use_calibration = self._base_model_config.use_calibration
+        self._calibration_loss_weight = (
+            self._base_model_config.calibration_loss_weight
+            if self._base_model_config.HasField("calibration_loss_weight")
+            else 0.0
+        )
+        # TODO: _calibration_target_ece 预留用于 target-ECE 正则化
+        # 当前实现使用 ECE 绝对值作为损失，target_ece 可在未来用于
+        # 构建 (ece - target)^2 形式的正则化项
+        self._calibration_target_ece = (
+            self._base_model_config.calibration_target_ece
+            if self._base_model_config.HasField("calibration_target_ece")
+            else 0.05
+        )
+
+        # Per-task calibration: model-level + task-level override
+        self._task_calib_enabled = (
+            self._model_config.task_calibration_enabled
+            if self._use_calibration
+            else False
+        )
+        self._initial_temperature = (
+            self._model_config.initial_temperature
+            if self._model_config.HasField("initial_temperature")
+            else 1.0
+        )
+        self._freeze_temperature = self._model_config.freeze_temperature
+
+        if self._task_calib_enabled:
+            num_tasks = len(self._task_tower_cfgs)
+            self._temperature_scalers = create_temperature_scalers(
+                num_tasks=num_tasks,
+                initial_temp=self._initial_temperature,
+                freeze=self._freeze_temperature,
+            )
+            # Map tower_name -> scaler index
+            self._tower_to_scaler_idx = {
+                cfg.tower_name: idx for idx, cfg in enumerate(self._task_tower_cfgs)
+            }
+        else:
+            self._temperature_scalers = None
+            self._tower_to_scaler_idx = {}
+        self._calibration_metrics = {}
+
     def _extract_bias(
         self, feature_tensors: List[torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -619,7 +668,25 @@ class PEPNetDCNPLE(MultiTaskRank):
                     tower_name
                 ] + self._cvr_direct_concat_final[tower_name](direct_concat_hidden)
 
+        # --- Temperature Calibration (apply to tower outputs) ---
+        if self._task_calib_enabled and self._temperature_scalers is not None:
+            for tower_name, tower_output in tower_outputs.items():
+                if tower_name in self._tower_to_scaler_idx:
+                    scaler = self._temperature_scalers[
+                        self._tower_to_scaler_idx[tower_name]
+                    ]
+                    tower_outputs[tower_name] = scaler(tower_output)
+
         predictions = self._multi_task_output_to_prediction(tower_outputs)
+
+        # Expose calibration metrics for logging (training only)
+        if self.training and self._temperature_scalers is not None:
+            temps = []
+            for tower_name in self._tower_to_scaler_idx:
+                idx = self._tower_to_scaler_idx[tower_name]
+                t = self._temperature_scalers[idx].get_temperature()
+                temps.append(f"{tower_name}={t.item():.4f}")
+            predictions["_calibration_temps"] = "; ".join(temps)
 
         if (
             self.training
@@ -661,6 +728,46 @@ class PEPNetDCNPLE(MultiTaskRank):
     ) -> Dict[str, torch.Tensor]:
         """Compute contrastive loss in addition to base task losses."""
         losses = super().loss(predictions, batch)
+
+        # --- Calibration Loss (CaliCausalRank-inspired) ---
+        if (
+            self._task_calib_enabled
+            and self._temperature_scalers is not None
+            and self._calibration_loss_weight > 0
+        ):
+            calib_losses = []
+            calib_temps = []
+            for task_tower_cfg in self._task_tower_cfgs:
+                tower_name = task_tower_cfg.tower_name
+                if tower_name not in self._tower_to_scaler_idx:
+                    continue
+                scaler = self._temperature_scalers[
+                    self._tower_to_scaler_idx[tower_name]
+                ]
+                temp = scaler.get_temperature()
+                calib_temps.append(f"{tower_name}:{temp.item():.4f}")
+                # Get probs and labels for this task
+                probs_key = f"probs_{tower_name}"
+                label_key = task_tower_cfg.label_name
+                if probs_key not in predictions or label_key not in batch.labels:
+                    continue
+                task_probs = predictions[probs_key]
+                task_labels = batch.labels[label_key]
+                task_weight = None
+                if task_tower_cfg.HasField("sample_weight_name"):
+                    sw_name = task_tower_cfg.sample_weight_name
+                    if sw_name in batch.sample_weights:
+                        task_weight = batch.sample_weights[sw_name]
+                ece = compute_soft_ece(task_probs, task_labels, task_weight)
+                calib_losses.append(ece)
+
+            if calib_losses:
+                total_calib_loss = sum(calib_losses) / len(calib_losses)
+                losses["calibration_loss"] = (
+                    total_calib_loss * self._calibration_loss_weight
+                )
+                self._calibration_metrics["calib_loss"] = total_calib_loss.item()
+                self._calibration_metrics["temperatures"] = "; ".join(calib_temps)
 
         if self._contrastive_loss_enabled and "_ctr_behavior" in predictions:
             v = predictions["_ctr_behavior"]

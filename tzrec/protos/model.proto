@@ -115,4 +115,11 @@ message ModelConfig {
     // from modifying shared/extraction network parameters
     optional bool isolate_cvr_gradient = 18 [default = false];
 
+    // Whether to enable temperature calibration for task towers.
+    optional bool use_calibration = 19 [default = false];
+    // Calibration loss weight (combined with task losses during training).
+    optional float calibration_loss_weight = 20 [default = 0.0];
+    // Target ECE for the calibration loss.
+    optional float calibration_target_ece = 21 [default = 0.05];
+
 }

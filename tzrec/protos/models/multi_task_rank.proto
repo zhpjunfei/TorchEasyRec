@@ -231,4 +231,10 @@ message PEPNetDCNPLE {
     optional float afp_min_temperature = 24 [default = 0.1];
     // AFP gate temperature (0.0 = same as afp_temperature).
     optional float afp_gate_temperature = 25 [default = 0.0];
+    // Whether to enable per-task temperature scaling.
+    optional bool task_calibration_enabled = 26 [default = false];
+    // Initial temperature value for all tasks (T=1 means no scaling).
+    optional float initial_temperature = 27 [default = 1.0];
+    // Whether to freeze temperature after initialization.
+    optional bool freeze_temperature = 28 [default = false];
 }
