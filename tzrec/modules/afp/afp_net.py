@@ -70,6 +70,7 @@ class AFPModule(nn.Module):
         temperature: float = 1.0,
         min_temperature: float = 0.1,
         gate_temperature: float = None,
+        entropy_reg_weight: float = 0.0,
     ) -> None:
         super().__init__()
         self.feature_dims = feature_dims
@@ -78,6 +79,9 @@ class AFPModule(nn.Module):
         self.temperature = temperature
         self.min_temperature = min_temperature
         self.gate_temperature = gate_temperature or temperature
+        self.entropy_reg_weight = (
+            entropy_reg_weight  # >0 enables partition entropy regularization
+        )
         self._total_dim = sum(feature_dims)
 
         # Build per-feature classifiers
@@ -260,6 +264,16 @@ class AFPModule(nn.Module):
                 aggregated_probs.append(bit_slice.mean(dim=1, keepdim=True))
             partition_probs = torch.cat(aggregated_probs, dim=1)  # [B, num_features]
 
+        # --- Partition entropy regularization ---
+        # Encourages exploration in early training by penalizing overly confident
+        # partitions. Weight anneals from entropy_reg_weight → 0 over training.
+        self._partition_entropy = None
+        if self.entropy_reg_weight > 0 and self.training:
+            p = partition_probs.clamp(1e-7, 1 - 1e-7)
+            log_p = torch.log(p)
+            entropy = -(p * log_p + (1 - p) * torch.log(1 - p + 1e-7)).mean()
+            self._partition_entropy = entropy.item()
+
         # Soft selection: partition_prob → DNN path, (1 - partition_prob) → Gate path
         gate_weights = 1.0 - partition_probs  # [B, num_features]
         dnn_weights = partition_probs  # [B, num_features]
@@ -305,6 +319,7 @@ class AFPModule(nn.Module):
             "partition_prob": partition_probs,
             "gate_mask": gate_mask,
             "dnn_mask": dnn_mask,
+            "partition_entropy": self._partition_entropy,
         }
 
     @torch.no_grad()

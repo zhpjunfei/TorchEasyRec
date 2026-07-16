@@ -257,6 +257,11 @@ class PEPNetDCNPLE(MultiTaskRank):
                 if self._model_config.HasField("afp_gate_temperature")
                 else 0.0
             )
+            self._afp_entropy_reg_weight = (
+                self._model_config.afp_entropy_reg_weight
+                if self._model_config.HasField("afp_entropy_reg_weight")
+                else 0.0
+            )
             # Build feature dims list for AFP (order matches lhuc group)
             self._afp_feature_dims = list(
                 self.embedding_group.group_feature_dims(self._lhuc_group_name).values()
@@ -268,6 +273,7 @@ class PEPNetDCNPLE(MultiTaskRank):
                 temperature=self._afp_temperature,
                 min_temperature=self._afp_min_temperature,
                 gate_temperature=self._afp_gate_temperature,
+                entropy_reg_weight=self._afp_entropy_reg_weight,
             )
         else:
             self.afp_module = None
@@ -583,22 +589,27 @@ class PEPNetDCNPLE(MultiTaskRank):
         deep_input = torch.cat(concat_parts, dim=1)
 
         # --- AFP partitioning (before EPNet) ---
+        # AFP partitions lhuc_features into gate_path and dnn_path.
+        # Key design: EPNet always receives COMPLETE lhuc_features to preserve
+        # its gate-generation capacity. AFP partition only affects PPNet tower
+        # input (gate_path features) and optionally tower-level weighting.
         gate_input_for_ppnet = None
+        # reserved for future tower-level weighting
         if self._afp_enabled and self.afp_module is not None:
             lhuc_features = grouped_features[self._lhuc_group_name]
             afp_result = self.afp_module(lhuc_features, hard_selection=False)
             gate_input_for_ppnet = afp_result["gate_input"]
-            dnn_input_for_epnet = afp_result["dnn_input"]
+            _partition_prob = afp_result.get("partition_prob")
         else:
-            dnn_input_for_epnet = None  # will use raw lhuc_features below
+            _partition_prob = None  # reserved for future tower-level weighting
 
-        # --- EPNet (LHUC) personalization with AFP partitioning ---
+        # --- EPNet (LHUC) personalization ---
+        # EPNet always receives complete lhuc_features regardless of AFP.
+        # AFP's partitioned dnn_input is NOT passed to EPNet — EPNet needs
+        # the full feature context to generate meaningful per-layer scales.
         if self.epnet is not None:
-            if self._afp_enabled and gate_input_for_ppnet is not None:
-                ep_scale = self.epnet(dnn_input_for_epnet)
-            else:
-                lhuc_features = grouped_features[self._lhuc_group_name]
-                ep_scale = self.epnet(lhuc_features)
+            lhuc_features = grouped_features[self._lhuc_group_name]
+            ep_scale = self.epnet(lhuc_features)
             deep_input = deep_input * ep_scale
 
         # Ensure gate_input_for_ppnet falls back to lhuc_features when AFP is disabled
@@ -614,6 +625,10 @@ class PEPNetDCNPLE(MultiTaskRank):
             )
 
         # --- LHUC_PPNet towers ---
+        # PPNet towers receive AFP-partitioned gate features as lhuc_input.
+        # The partition_prob (if available) represents the soft assignment
+        # of each feature to the DNN path, so (1 - partition_prob) is
+        # implicitly encoded in gate_input.
         lhuc_input = gate_input_for_ppnet
         tower_hidden = {}
         for i, task_tower_cfg in enumerate(self._task_tower_cfgs):
@@ -679,7 +694,10 @@ class PEPNetDCNPLE(MultiTaskRank):
 
         predictions = self._multi_task_output_to_prediction(tower_outputs)
 
-        # Expose calibration metrics for logging (training only)
+        # Collect calibration temperatures for logging (training only)
+        # Store in _calibration_metrics instead of predictions dict,
+        # because model.forward() calls .detach() on all prediction values
+        # and str objects have no detach() method.
         if self.training and self._temperature_scalers is not None:
             temps = []
             for tower_name in self._tower_to_scaler_idx:
@@ -690,7 +708,7 @@ class PEPNetDCNPLE(MultiTaskRank):
                     break
                 temps.append(f"{tower_name}={t.item():.4f}")
             if temps:
-                predictions["_calibration_temps"] = "; ".join(temps)
+                self._calibration_metrics["temperatures"] = "; ".join(temps)
 
         if (
             self.training
@@ -732,6 +750,39 @@ class PEPNetDCNPLE(MultiTaskRank):
     ) -> Dict[str, torch.Tensor]:
         """Compute contrastive loss in addition to base task losses."""
         losses = super().loss(predictions, batch)
+
+        # --- AFP Partition Entropy Regularization ---
+        # Applied during training to encourage feature exploration.
+        # Weight decays from entropy_reg_weight → 0 over training steps.
+        if (
+            self._afp_enabled
+            and self.afp_module is not None
+            and self.afp_module.entropy_reg_weight > 0
+        ):
+            entropy = getattr(self.afp_module, "_partition_entropy", None)
+            if entropy is not None:
+                # Compute annealed weight based on current temperature schedule
+                current_temp = self.afp_module.current_temperature()
+                temp_progress = 1.0 - (
+                    (current_temp - self.afp_module.min_temperature)
+                    / max(
+                        self.afp_module.temperature - self.afp_module.min_temperature,
+                        1e-6,
+                    )
+                )
+                annealed_weight = self.afp_module.entropy_reg_weight * (
+                    1.0 - temp_progress * 0.8
+                )
+                if annealed_weight > 1e-6:
+                    # Find any loss tensor to get the device
+                    ref_device = "cpu"
+                    for _k, v in losses.items():
+                        if isinstance(v, torch.Tensor):
+                            ref_device = v.device
+                            break
+                    losses["afp_entropy_reg"] = (
+                        torch.tensor(entropy, device=ref_device) * annealed_weight
+                    )
 
         # --- Calibration Loss (CaliCausalRank-inspired) ---
         if (
