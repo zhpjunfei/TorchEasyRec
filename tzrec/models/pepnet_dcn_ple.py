@@ -466,14 +466,25 @@ class PEPNetDCNPLE(MultiTaskRank):
             else 0.0
         )
         # TODO: _calibration_target_ece 预留用于 target-ECE 正则化
-        # 当前实现使用 ECE 绝对值作为损失，target_ece 可在未来用于
-        # 构建 (ece - target)^2 形式的正则化项
         self._calibration_target_ece = (
             self._base_model_config.calibration_target_ece
             if self._base_model_config.HasField("calibration_target_ece")
             else 0.05
         )
-
+        # Progressive calibration schedule: "steps:weights" comma-separated
+        self._progressive_schedule = (
+            self._base_model_config.progressive_calibration_schedule
+            if self._base_model_config.HasField("progressive_calibration_schedule")
+            and self._base_model_config.progressive_calibration_schedule
+            else ""
+        )
+        self._calibrated_tower_names = set()
+        if self._base_model_config.HasField("calibration_tower_names") and (
+            tower_names := self._base_model_config.calibration_tower_names
+        ):
+            self._calibrated_tower_names = {
+                t.strip() for t in tower_names.split(",") if t.strip()
+            }
         # Per-task calibration: model-level + task-level override
         self._task_calib_enabled = (
             self._model_config.task_calibration_enabled
@@ -498,10 +509,61 @@ class PEPNetDCNPLE(MultiTaskRank):
             self._tower_to_scaler_idx = {
                 cfg.tower_name: idx for idx, cfg in enumerate(self._task_tower_cfgs)
             }
+            # Filter calibrated towers if calibration_tower_names is set
+            if self._calibrated_tower_names:
+                self._tower_to_scaler_idx = {
+                    name: idx
+                    for name, idx in self._tower_to_scaler_idx.items()
+                    if name in self._calibrated_tower_names
+                }
         else:
             self._temperature_scalers = None
             self._tower_to_scaler_idx = {}
         self._calibration_metrics = {}
+        self._current_step = 0
+
+    def set_current_step(self, step: int) -> None:
+        """Call from training loop to set current step for progressive calibration.
+
+        Args:
+            step: Current training step number.
+        """
+        self._current_step = step
+
+    def _get_current_calibration_weight(self, current_step: int) -> float:
+        """Get calibration weight for the current training step.
+
+        Supports progressive schedule: "steps:weights" comma-separated.
+        Example: "2000:0.0,4000:0.02,6000:0.05"
+        Falls back to constant weight if no schedule defined.
+        """
+        if not self._progressive_schedule:
+            return self._calibration_loss_weight
+
+        pairs = [p.strip() for p in self._progressive_schedule.split(",")]
+        schedule = []
+        for pair in pairs:
+            if ":" in pair:
+                steps, weight = pair.split(":")
+                schedule.append((int(steps.strip()), float(weight.strip())))
+        if not schedule:
+            return self._calibration_loss_weight
+
+        schedule.sort(key=lambda x: x[0])
+
+        if current_step <= schedule[0][0]:
+            return schedule[0][1]
+        if current_step >= schedule[-1][0]:
+            return schedule[-1][1]
+
+        for i in range(len(schedule) - 1):
+            s1, w1 = schedule[i]
+            s2, w2 = schedule[i + 1]
+            if s1 <= current_step <= s2:
+                alpha = (current_step - s1) / max(s2 - s1, 1)
+                return w1 + alpha * (w2 - w1)
+
+        return self._calibration_loss_weight
 
     def _extract_bias(
         self, feature_tensors: List[torch.Tensor]
@@ -824,9 +886,10 @@ class PEPNetDCNPLE(MultiTaskRank):
 
             if calib_losses:
                 total_calib_loss = sum(calib_losses) / len(calib_losses)
-                losses["calibration_loss"] = (
-                    total_calib_loss * self._calibration_loss_weight
+                current_weight = self._get_current_calibration_weight(
+                    self._current_step
                 )
+                losses["calibration_loss"] = total_calib_loss * current_weight
                 self._calibration_metrics["calib_loss"] = total_calib_loss.item()
                 self._calibration_metrics["temperatures"] = "; ".join(calib_temps)
 

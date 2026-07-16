@@ -122,4 +122,13 @@ message ModelConfig {
     // Target ECE for the calibration loss.
     optional float calibration_target_ece = 21 [default = 0.05];
 
+    // Progressive calibration: weight schedule (comma-separated pairs of
+    // "warmup_steps:weight"). Example: "2000:0.0,4000:0.02,6000:0.05"
+    // If empty, uses constant calibration_loss_weight.
+    optional string progressive_calibration_schedule = 22 [default = ""];
+
+    // Comma-separated list of tower names to calibrate. Empty = all tasks.
+    // Example: "cvr" to calibrate only CVR tower.
+    optional string calibration_tower_names = 23 [default = ""];
+
 }
