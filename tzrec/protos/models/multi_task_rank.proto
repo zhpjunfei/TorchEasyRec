@@ -235,6 +235,12 @@ message PEPNetDCNPLE {
     // Encourages feature exploration in early training; weight decays
     // as temperature anneals. Default 0.05 gives mild regularization.
     optional float afp_entropy_reg_weight = 29 [default = 0.0];
+    // Whether to use per-task AFP (separate partition for each task).
+    // When enabled, each task tower gets its own AFP classifier.
+    optional bool afp_per_task_enabled = 30 [default = false];
+    // Use exponential decay for AFP temperature annealing
+    // (faster early convergence, reduces unstable partition_prob).
+    optional bool afp_exp_temp_decay = 31 [default = false];
     // Whether to enable per-task temperature scaling.
     optional bool task_calibration_enabled = 26 [default = false];
     // Initial temperature value for all tasks (T=1 means no scaling).

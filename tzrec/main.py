@@ -444,18 +444,19 @@ def _train_and_evaluate(
                 _model.update_train_metric(predictions, batch)
 
                 # --- AFP temperature annealing (APPNet) ---
-                if use_step and hasattr(_model, "anneal_temperature"):
+                if hasattr(_model, "anneal_temperature"):
                     _model.anneal_temperature(i_step, train_config.num_steps)
                     if (
-                        hasattr(_model, "afp_module")
-                        and _model.afp_module is not None
+                        hasattr(_model, "afp_temperature")
                         and i_step % train_config.log_step_count_steps == 0
+                        and plogger is not None
                     ):
-                        _afp_temp = _model.afp_module.current_temperature()
-                        plogger.log_scalar("afp_temperature", _afp_temp, i_step)
+                        _afp_temp = _model.afp_temperature()
+                        if _afp_temp is not None:
+                            plogger.log_scalar("afp_temperature", _afp_temp, i_step)
 
-                # --- Progressive calibration step notification (APPNet) ---
-                if use_step and hasattr(_model, "set_current_step"):
+                # --- Progressive calibration step notification ---
+                if hasattr(_model, "set_current_step"):
                     _model.set_current_step(i_step)
                 if i_step % train_config.log_step_count_steps == 0:
                     train_metrics = _model.compute_train_metric()

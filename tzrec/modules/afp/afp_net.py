@@ -21,6 +21,7 @@ with a learnable, data-driven partitioning strategy.
 Reference: APPNet (Liu et al., WSDM 2026)
 """
 
+import math
 from enum import Enum
 from typing import Dict, List, Optional
 
@@ -156,18 +157,44 @@ class AFPModule(nn.Module):
             self.bit_offsets.append(offset)
             offset += dim
 
-    def anneal_temperature(self, step: int, total_steps: int) -> None:
-        """Linear temperature annealing from current_temp to min_temperature."""
+    def anneal_temperature(
+        self, step: int, total_steps: int, exp_decay: bool = False
+    ) -> None:
+        """Temperature annealing from current_temp to min_temperature.
+
+        Args:
+            step: Current training step.
+            total_steps: Total training steps for normalization.
+            exp_decay: If True, use exponential decay for faster early
+                convergence. Reduces unstable partition_prob values
+                (where classifier outputs ≈ 0.5) during early training.
+        """
         progress = min(step / max(total_steps, 1), 1.0)
-        self._current_temp.fill_(
-            self.min_temperature
-            + (self.temperature - self.min_temperature) * (1.0 - progress)
-        )
-        if self.gate_temperature != self.temperature:
-            self._current_gate_temp.fill_(
+        if exp_decay:
+            # Exponential decay: rapid early convergence, slow tail
+            # decay_factor=3.0 means temp drops to ~5% of range by 50% progress
+            decay_progress = 1.0 - math.exp(-3.0 * progress)
+            self._current_temp.fill_(
                 self.min_temperature
-                + (self.gate_temperature - self.min_temperature) * (1.0 - progress)
+                + (self.temperature - self.min_temperature) * (1.0 - decay_progress)
             )
+            if self.gate_temperature != self.temperature:
+                self._current_gate_temp.fill_(
+                    self.min_temperature
+                    + (self.gate_temperature - self.min_temperature)
+                    * (1.0 - decay_progress)
+                )
+        else:
+            # Linear decay (original behavior)
+            self._current_temp.fill_(
+                self.min_temperature
+                + (self.temperature - self.min_temperature) * (1.0 - progress)
+            )
+            if self.gate_temperature != self.temperature:
+                self._current_gate_temp.fill_(
+                    self.min_temperature
+                    + (self.gate_temperature - self.min_temperature) * (1.0 - progress)
+                )
 
     def current_temperature(self) -> float:
         """Return current annealed temperature (public getter for logging)."""

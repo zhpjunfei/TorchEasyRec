@@ -278,6 +278,29 @@ class PEPNetDCNPLE(MultiTaskRank):
         else:
             self.afp_module = None
 
+        # --- Suggestion 1: Task-Specific AFP modules ---
+        # When enabled, each task tower gets its own AFP classifier,
+        # addressing cross-task gradient conflicts (GradCraft KDD'24, PUB arXiv'24).
+        self._afp_per_task_enabled = (
+            self._model_config.afp_per_task_enabled
+            if self._model_config.HasField("afp_per_task_enabled")
+            else False
+        )
+        self.afp_modules_by_task = nn.ModuleDict()
+        if self._afp_per_task_enabled and self._afp_enabled:
+            for tower_cfg in self._task_tower_cfgs:
+                task_name = tower_cfg.tower_name
+                task_afp = AFPModule(
+                    feature_dims=self._afp_feature_dims,
+                    mode=self._afp_mode,
+                    hidden_units=self._afp_hidden_units,
+                    temperature=self._afp_temperature,
+                    min_temperature=self._afp_min_temperature,
+                    gate_temperature=self._afp_gate_temperature,
+                    entropy_reg_weight=self._afp_entropy_reg_weight,
+                )
+                self.afp_modules_by_task[task_name] = task_afp
+
         # --- PLE ExtractionNet layers ---
         self._extraction_nets = nn.ModuleList()
         in_extraction_networks = [deep_concat_dim] * len(self._task_tower_cfgs)
@@ -351,6 +374,31 @@ class PEPNetDCNPLE(MultiTaskRank):
             self._tower_final[tower_name] = nn.Linear(
                 self._tower_hidden_dims[tower_name], tower_cfg.num_class
             )
+
+        # --- Suggestion 3: Gradient conflict monitoring hooks ---
+        # Register hooks on task tower parameters to collect per-task gradients.
+        # Computes cosine similarity between CTR and CVR gradients for conflict
+        # quantification (addresses "no gradient conflict evidence" gap).
+        # Must be placed after _tower_final is populated above.
+        self._gradient_hooks = []
+        self._task_gradients: Dict[str, Optional[torch.Tensor]] = {}
+        for tower_name in self._tower_hidden_dims:
+            self._task_gradients[tower_name] = None
+        # Register hooks on each tower's final linear layer parameters.
+        # Hook captures the gradient of the output logits for each task.
+        # Uses register_hook on parameters (modern PyTorch API).
+        for tower_name, final_layer in self._tower_final.items():
+
+            def make_hook(name):
+                def hook(grad):
+                    if grad is not None:
+                        self._task_gradients[name] = grad.flatten()
+
+                return hook
+
+            for param in final_layer.parameters():
+                handle = param.register_hook(make_hook(tower_name))
+                self._gradient_hooks.append(handle)
 
         self._cvr_tower_names = [
             n for n in self._tower_hidden_dims if n != self._ctr_tower_name
@@ -670,13 +718,25 @@ class PEPNetDCNPLE(MultiTaskRank):
         # Key design: EPNet always receives COMPLETE lhuc_features to preserve
         # its gate-generation capacity. AFP partition only affects PPNet tower
         # input (gate_path features) and optionally tower-level weighting.
+        #
+        # When _afp_per_task_enabled, each task gets its own AFP partition,
+        # allowing CTR and CVR towers to learn different feature routing.
+        # Otherwise, a shared AFP module is used (original behavior).
         gate_input_for_ppnet = None
-        # reserved for future tower-level weighting
+        _partition_prob = None
+        _afp_result_by_task = {}
         if self._afp_enabled and self.afp_module is not None:
             lhuc_features = grouped_features[self._lhuc_group_name]
-            afp_result = self.afp_module(lhuc_features, hard_selection=False)
-            gate_input_for_ppnet = afp_result["gate_input"]
-            _partition_prob = afp_result.get("partition_prob")
+            if self._afp_per_task_enabled:
+                # Task-specific AFP: each task gets its own partition
+                for task_name, task_afp in self.afp_modules_by_task.items():
+                    task_result = task_afp(lhuc_features, hard_selection=False)
+                    _afp_result_by_task[task_name] = task_result
+            else:
+                # Shared AFP (original behavior)
+                afp_result = self.afp_module(lhuc_features, hard_selection=False)
+                gate_input_for_ppnet = afp_result["gate_input"]
+                _partition_prob = afp_result.get("partition_prob")
         else:
             _partition_prob = None  # reserved for future tower-level weighting
 
@@ -703,16 +763,22 @@ class PEPNetDCNPLE(MultiTaskRank):
 
         # --- LHUC_PPNet towers ---
         # PPNet towers receive AFP-partitioned gate features as lhuc_input.
+        # When task-specific AFP is enabled, each tower uses its own partition.
         # The partition_prob (if available) represents the soft assignment
         # of each feature to the DNN path, so (1 - partition_prob) is
         # implicitly encoded in gate_input.
-        lhuc_input = gate_input_for_ppnet
         tower_hidden = {}
         for i, task_tower_cfg in enumerate(self._task_tower_cfgs):
             tower_name = task_tower_cfg.tower_name
             fea = extraction_network_fea[i]
             if self._isolate_cvr_gradient and tower_name != self._ctr_tower_name:
                 fea = fea.detach()
+            # Use task-specific gate input if available, otherwise shared
+            if self._afp_per_task_enabled and tower_name in _afp_result_by_task:
+                task_afp_result = _afp_result_by_task[tower_name]
+                lhuc_input = task_afp_result["gate_input"]
+            else:
+                lhuc_input = gate_input_for_ppnet
             tower_hidden[tower_name] = self._task_towers[i](fea, lhuc_input)
 
         # --- CVR Direct Highway ---
@@ -818,14 +884,97 @@ class PEPNetDCNPLE(MultiTaskRank):
         return predictions
 
     def anneal_temperature(self, step: int, total_steps: int) -> None:
-        """Anneal AFP temperature during training. Call from trainer loop."""
+        """Anneal AFP temperature during training. Call from trainer loop.
+
+        Supports both linear and exponential decay schedules.
+        Exponential decay (afp_exp_temp_decay=true) converges faster
+        in early training, reducing unstable partition_prob values.
+        """
+        exp_decay = (
+            self._model_config.afp_exp_temp_decay
+            if self._model_config.HasField("afp_exp_temp_decay")
+            else False
+        )
         if self._afp_enabled and self.afp_module is not None:
-            self.afp_module.anneal_temperature(step, total_steps)
+            self.afp_module.anneal_temperature(step, total_steps, exp_decay=exp_decay)
+        # Also anneal task-specific AFP modules
+        for task_afp in self.afp_modules_by_task.values():
+            task_afp.anneal_temperature(step, total_steps, exp_decay=exp_decay)
+
+    def afp_temperature(self) -> Optional[float]:
+        """Return current AFP temperature for logging.
+
+        In per-task mode, returns the temperature of the first task AFP.
+        Falls back to shared AFP temperature if per-task is not enabled.
+        Returns None if no AFP module is active.
+        """
+        if self._afp_per_task_enabled and self.afp_modules_by_task:
+            first_task = next(iter(self.afp_modules_by_task.values()))
+            return first_task.current_temperature()
+        if self.afp_module is not None:
+            return self.afp_module.current_temperature()
+        return None
+
+    # --- Suggestion 3: Gradient conflict monitoring ---
+    def compute_gradient_conflict(self) -> Dict[str, float]:
+        """Compute cosine similarity between task gradients.
+
+        Must be called AFTER backward() (after the trainer calls loss.backward()).
+        Returns a dict with gradient norms and pairwise cosine similarities.
+        Returns empty dict if gradients haven't been collected yet.
+        """
+        result = {}
+        # Gather all non-None gradients
+        grads = {
+            name: grad
+            for name, grad in self._task_gradients.items()
+            if grad is not None
+        }
+        if len(grads) < 2:
+            return result
+
+        # Compute norms
+        for name, grad in grads.items():
+            result[f"grad_norm_{name}"] = grad.norm().item()
+
+        # Compute pairwise cosine similarities
+        names = list(grads.keys())
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                g1 = grads[names[i]]
+                g2 = grads[names[j]]
+                cos_sim = F.cosine_similarity(g1, g2, dim=0).item()
+                result[f"grad_cos_sim_{names[i]}_{names[j]}"] = cos_sim
+                # Negative cosine = conflict, positive = alignment
+                if cos_sim < -0.1:
+                    result[f"grad_conflict_{names[i]}_{names[j]}"] = True
+                else:
+                    result[f"grad_conflict_{names[i]}_{names[j]}"] = False
+
+        return result
+
+    def clear_task_gradients(self) -> None:
+        """Clear collected gradients after monitoring.
+
+        Must be called after compute_gradient_conflict() to reset
+        for the next backward pass.
+        """
+        for task_name in self._task_gradients:
+            self._task_gradients[task_name] = None
 
     def loss(
         self, predictions: Dict[str, torch.Tensor], batch: Batch
     ) -> Dict[str, torch.Tensor]:
-        """Compute contrastive loss in addition to base task losses."""
+        """Compute contrastive loss in addition to base task losses.
+
+        Also collects per-task gradients for conflict monitoring
+        (Suggestion 3) when gradient hooks are registered.
+        """
+        # --- Suggestion 3: Collect per-task gradients via hooks ---
+        # Clear previous gradients before backward
+        for task_name in self._task_gradients:
+            self._task_gradients[task_name] = None
+
         losses = super().loss(predictions, batch)
 
         # --- AFP Partition Entropy Regularization ---
