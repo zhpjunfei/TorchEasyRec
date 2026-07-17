@@ -518,12 +518,54 @@ CaliCausalRank 提出 **score calibration 应作为首要训练目标**。
 
 ### 后续计划
 
-| 序号 | 实验         | 内容                                                                               |         预期          |
-| :--: | ------------ | ---------------------------------------------------------------------------------- | :-------------------: |
-|  1   | **修复 B**   | 在 trainer 中调用 `model.set_current_step()`                                       | calibration_loss 生效 |
-|  2   | **方案 D**   | A+B 融合：T=1.5, weight=0.02, progressive="2000:0.0,4000:0.02,6000:0.03", cvr_only |     CVR AUC +1~3%     |
-|  3   | **T 扫描**   | initial_temperature ∈ {1.2, 1.5, 2.0, 2.5}                                         |    找最优软化系数     |
-|  4   | **多 Epoch** | 训练 3+ epochs 验证趋势稳定性                                                      |     确认长期效果      |
+| 序号 | 实验 | 内容 | 预期 |
+| :--: | ---- | ---- | :--: |
+
+### 修复记录
+
+**2026-07-17: 修复方案 B 完全失效的根因**
+
+方案 B 的 `calibration_loss: 0.00000` 不是因为 schedule 逻辑错误，而是因为：
+
+- `set_current_step()` 方法存在但 **trainer 未调用**
+- `_current_step` 保持初始值 `0`
+- `_get_current_calibration_weight(0)` 返回 `schedule[0][1] = 0.0`
+- 校准损失始终为零
+
+**修复：** 在 `tzrec/main.py` training loop 中添加：
+
+```python
+if hasattr(_model, "set_current_step"):
+    _model.set_current_step(i_step)
+```
+
+与现有 `anneal_temperature` 模式一致，向后兼容。
+
+### 方案 D：A+B 融合
+
+融合方案 A（T=1.5 软化 + 低权重）和方案 B（progressive + cvr_only）的优势：
+
+| 配置项                  | 方案 A    | 方案 B             | 方案 D                 |
+| ----------------------- | --------- | ------------------ | ---------------------- |
+| initial_temperature     | 1.5       | 1.0                | **1.5**                |
+| calibration_loss_weight | 0.02      | 0.05               | **0.02**               |
+| progressive schedule    | 无        | 2000:0.0→6000:0.05 | **2000:0.0→6000:0.03** |
+| calibration_tower_names | 全部      | cvr                | **cvr**                |
+| 预期效果                | CVR +1.8% | 修复后未知         | **CVR +2~4%**          |
+
+设计逻辑：
+
+- T=1.5 提供隐式 CVR 正则化（方案 A 已验证正向）
+- weight=0.02 最小化对主任务的干扰
+- progressive schedule 确保前 2000 step 无校准干扰，等主任务稳定后再介入
+- 只校准 CVR 保护 CTR 排名质量
+
+配置文件：`home_flow_2604_v15_calibration_d_fusion.config`
+
+| 1 | **修复 B** | 在 trainer 中调用 `model.set_current_step()` | calibration_loss 生效 |
+| 2 | **方案 D** | A+B 融合：T=1.5, weight=0.02, progressive="2000:0.0,4000:0.02,6000:0.03", cvr_only | CVR AUC +1~3% |
+| 3 | **T 扫描** | initial_temperature ∈ {1.2, 1.5, 2.0, 2.5} | 找最优软化系数 |
+| 4 | **多 Epoch** | 训练 3+ epochs 验证趋势稳定性 | 确认长期效果 |
 
 ### 决策逻辑
 
