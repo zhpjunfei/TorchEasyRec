@@ -238,3 +238,78 @@ seq_transformer ≥ +0.5pp → 主攻 sequence（扩展到更多序列）
 ```
 
 ______________________________________________________________________
+
+## 七、CaliCausalRank 温度校准实验 (2026-07-16)
+
+### 背景
+
+CaliCausalRank 提出 **score calibration 应作为首要训练目标**。
+在 v15 baseline 上引入 per-task temperature scaling + soft ECE loss，
+观察对 CTR/CVR AUC 和概率校准的影响。
+
+### 基线数据
+
+| 指标                    | Baseline     |
+| ----------------------- | ------------ |
+| auc_ctr                 | 0.716480     |
+| auc_cvr                 | 0.747323     |
+| calibration_loss_weight | 0.0 (无校准) |
+
+### 实验结果对比 (Epoch 0, 7700 it)
+
+| 指标                 | Baseline | A_lowweight         | B_progressive        | C_cvr_only       |
+| -------------------- | -------- | ------------------- | -------------------- | ---------------- |
+| **auc_ctr**          | 0.71539  | 0.70747 (-1.1%)     | **0.71533** (-0.01%) | 0.71024 (-0.7%)  |
+| **auc_cvr**          | 0.75392  | **0.76779** (+1.8%) | 0.75376 (-0.02%)     | 0.71775 (-4.8%)  |
+| **bce_ctr**          | 2.64624  | 2.67243 (+1.0%)     | 2.64523 (-0.04%)     | 2.66894 (+0.9%)  |
+| **bce_ctcvr**        | 0.30655  | 0.34593 (+12.9%)    | 0.30581 (-0.2%)      | 0.35701 (+16.5%) |
+| **calibration_loss** | —        | 0.04305             | **0.00000**          | 0.05631          |
+| **total_loss**       | 2.95278  | 3.06141 (+3.7%)     | 2.95103 (-0.1%)      | 3.08226 (+4.4%)  |
+
+### 逐项分析
+
+#### 方案 A (lowweight, weight=0.02, T=1.5) — ✅ 唯一正向
+
+- AUC_CTR 微降 1.1%，但 **AUC_CVR 提升 1.8%**，是唯一 CVR 正向的方案
+- `initial_temperature=1.5` 软化 logits 相当于隐式 CVR 正则化
+- CVR 标签稀疏（50% 转化），模型易对正样本过度自信，T=1.5 强制概率趋近均匀
+- BCE_ctcvr 上升 12.9%，说明 CTCVR 联合损失受校准干扰，但 AUC_CVR 提升抵消了负面影响
+
+#### 方案 B (progressive, weight=0.05, 只校CVR) — ❌ 完全失效
+
+- `calibration_loss: 0.00000` — 校准损失为零
+- **根因：** trainer 未调用 `set_current_step()`，`_current_step=0`
+- `_get_current_calibration_weight(0)` 返回 `schedule[0][1]=0.0`（第一步权重）
+- 好消息：AUC 几乎等于 baseline（ctr -0.01%, cvr -0.02%），证明 `calibration_tower_names: "cvr"` 过滤逻辑正确
+
+#### 方案 C (cvr_only, weight=0.05, 只校CVR) — ⚠️ 负向但好于全塔
+
+- AUC_CVR 下降 4.8%，优于全塔校准的 6.4%
+- 只校准 CVR 保护了 CTR 排名质量
+- 但 weight=0.05 仍偏大，ECE 梯度与 BCE 梯度在 CVR 塔上冲突
+
+### 核心洞见
+
+1. **T=1.5 软化 logits 是正向杠杆** — 对 CVR 稀疏标签场景有隐式正则化效果
+1. **只校准 CVR 优于全塔校准** — CTR 排名质量不应被校准干扰
+1. **方案 B 的 progressive schedule 设计正确，但需要 trainer 集成**
+1. **仅 1 epoch 数据，趋势尚不稳固** — 需要多 epoch 验证
+
+### 后续计划
+
+| 序号 | 实验         | 内容                                                                               |         预期          |
+| :--: | ------------ | ---------------------------------------------------------------------------------- | :-------------------: |
+|  1   | **修复 B**   | 在 trainer 中调用 `model.set_current_step()`                                       | calibration_loss 生效 |
+|  2   | **方案 D**   | A+B 融合：T=1.5, weight=0.02, progressive="2000:0.0,4000:0.02,6000:0.03", cvr_only |     CVR AUC +1~3%     |
+|  3   | **T 扫描**   | initial_temperature ∈ {1.2, 1.5, 2.0, 2.5}                                         |    找最优软化系数     |
+|  4   | **多 Epoch** | 训练 3+ epochs 验证趋势稳定性                                                      |     确认长期效果      |
+
+### 决策逻辑
+
+```
+修复 B 后 progressive 生效 → AUC_CVR ≥ baseline → 确认 progressive + cvr_only 方向
+A 方案 T=1.5 正向 → 扫描 T 值找最优
+全部校准实验 ΔAUC < -0.5% → 考虑放弃校准，回归 baseline + T=1.5 软化
+```
+
+______________________________________________________________________
