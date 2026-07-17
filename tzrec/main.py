@@ -449,11 +449,13 @@ def _train_and_evaluate(
                     if (
                         hasattr(_model, "afp_temperature")
                         and i_step % train_config.log_step_count_steps == 0
-                        and plogger is not None
+                        and summary_writer is not None
                     ):
                         _afp_temp = _model.afp_temperature()
                         if _afp_temp is not None:
-                            plogger.log_scalar("afp_temperature", _afp_temp, i_step)
+                            summary_writer.add_scalar(
+                                "afp_temperature", _afp_temp, i_step
+                            )
 
                 # --- Progressive calibration step notification ---
                 if hasattr(_model, "set_current_step"):
