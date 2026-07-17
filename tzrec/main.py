@@ -454,8 +454,8 @@ def _train_and_evaluate(
                         _afp_temp = _model.afp_module.current_temperature()
                         plogger.log_scalar("afp_temperature", _afp_temp, i_step)
 
-                # --- Progressive calibration step notification ---
-                if hasattr(_model, "set_current_step"):
+                # --- Progressive calibration step notification (APPNet) ---
+                if use_step and hasattr(_model, "set_current_step"):
                     _model.set_current_step(i_step)
                 if i_step % train_config.log_step_count_steps == 0:
                     train_metrics = _model.compute_train_metric()

@@ -478,6 +478,10 @@ class PEPNetDCNPLE(MultiTaskRank):
             and self._base_model_config.progressive_calibration_schedule
             else ""
         )
+        # Pre-parse progressive schedule for efficient runtime lookup
+        self._parsed_schedule = self._parse_calibration_schedule(
+            self._progressive_schedule
+        )
         self._calibrated_tower_names = set()
         if self._base_model_config.HasField("calibration_tower_names") and (
             tower_names := self._base_model_config.calibration_tower_names
@@ -530,26 +534,37 @@ class PEPNetDCNPLE(MultiTaskRank):
         """
         self._current_step = step
 
-    def _get_current_calibration_weight(self, current_step: int) -> float:
-        """Get calibration weight for the current training step.
+    @staticmethod
+    def _parse_calibration_schedule(schedule_str: str) -> list:
+        """Parse progressive schedule string into sorted [(step, weight), ...].
 
-        Supports progressive schedule: "steps:weights" comma-separated.
-        Example: "2000:0.0,4000:0.02,6000:0.05"
-        Falls back to constant weight if no schedule defined.
+        Args:
+            schedule_str: "2000:0.0,4000:0.02,6000:0.05"
+
+        Returns:
+            Sorted list of (step, weight) tuples, or empty list if invalid.
         """
-        if not self._progressive_schedule:
-            return self._calibration_loss_weight
-
-        pairs = [p.strip() for p in self._progressive_schedule.split(",")]
+        if not schedule_str:
+            return []
+        pairs = [p.strip() for p in schedule_str.split(",")]
         schedule = []
         for pair in pairs:
             if ":" in pair:
                 steps, weight = pair.split(":")
                 schedule.append((int(steps.strip()), float(weight.strip())))
-        if not schedule:
+        schedule.sort(key=lambda x: x[0])
+        return schedule
+
+    def _get_current_calibration_weight(self, current_step: int) -> float:
+        """Get calibration weight for the current training step.
+
+        Uses pre-parsed schedule for efficient lookup.
+        Falls back to constant weight if no schedule defined.
+        """
+        if not self._parsed_schedule:
             return self._calibration_loss_weight
 
-        schedule.sort(key=lambda x: x[0])
+        schedule = self._parsed_schedule
 
         if current_step <= schedule[0][0]:
             return schedule[0][1]
