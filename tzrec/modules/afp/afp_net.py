@@ -78,7 +78,9 @@ class AFPModule(nn.Module):
         self.mode = AFPMode(mode)
         self.temperature = temperature
         self.min_temperature = min_temperature
-        self.gate_temperature = gate_temperature or temperature
+        self.gate_temperature = (
+            gate_temperature if gate_temperature is not None else temperature
+        )
         self.entropy_reg_weight = (
             entropy_reg_weight  # >0 enables partition entropy regularization
         )
@@ -93,7 +95,10 @@ class AFPModule(nn.Module):
         # Temperature annealing schedule
         self.register_buffer("_current_temp", torch.tensor(temperature))
         self.register_buffer(
-            "_current_gate_temp", torch.tensor(gate_temperature or temperature)
+            "_current_gate_temp",
+            torch.tensor(
+                gate_temperature if gate_temperature is not None else temperature
+            ),
         )
 
         # Pre-compute bit-to-feature mapping for BIT_WISE (avoids O(n^2) lookup)
