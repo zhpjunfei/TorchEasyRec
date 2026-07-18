@@ -86,6 +86,7 @@ class AFPModule(nn.Module):
             entropy_reg_weight  # >0 enables partition entropy regularization
         )
         self._total_dim = sum(feature_dims)
+        self._hard_partition_threshold = 0.5  # Threshold for hard gate/dnn assignment
 
         # Build per-feature classifiers
         if self.mode == AFPMode.FEATURE_WISE:
@@ -229,8 +230,15 @@ class AFPModule(nn.Module):
             )[:-1]
 
         # Dimension check: features.size(1) must equal sum(feature_dims).
-        # Mismatch will fail in subsequent slicing with a clear error.
-        # Assert removed to avoid FX tracing issues.
+        # Skip during FX tracing to avoid Proxy bool conversion errors.
+        if not self._is_fx_proxy(features):
+            expected_dim = sum(self.feature_dims)
+            actual_dim = features.size(1)
+            if actual_dim != expected_dim:
+                raise ValueError(
+                    f"AFP feature dim mismatch: expected {expected_dim} "
+                    f"(sum of {self.feature_dims}), got {actual_dim}"
+                )
 
         if self.mode == AFPMode.FEATURE_WISE:
             partition_probs = []
@@ -262,12 +270,9 @@ class AFPModule(nn.Module):
             # Each bit classifies its own scalar dimension directly.
             bit_probs = []
             for bit_idx, classifier in enumerate(self.bit_classifiers):
-                feat_idx = self._bit_to_feat[bit_idx].item()
-                feat_start = self.bit_offsets[feat_idx]
-                bit_offset_in_feat = bit_idx - feat_start
-                # Extract this single bit's dimension
-                bit_start = feat_start + bit_offset_in_feat
-                bit_val = features[:, bit_start : bit_start + 1]  # [B, 1]
+                # In bit_wise mode, bit_idx directly indexes into the
+                # flattened feature tensor (bit_start == bit_idx).
+                bit_val = features[:, bit_idx : bit_idx + 1]  # [B, 1]
                 logit = classifier(bit_val)  # [B, 1]
                 # Gumbel-softmax with temperature
                 if self.training:
@@ -327,7 +332,9 @@ class AFPModule(nn.Module):
 
         # Hard selection for inference
         if hard_selection:
-            gate_mask = (partition_probs < 0.5).float()  # [B, num_features]
+            gate_mask = (
+                partition_probs < self._hard_partition_threshold
+            ).float()  # [B, num_features]
             dnn_mask = 1.0 - gate_mask
             gate_parts_hard = []
             dnn_parts_hard = []
@@ -353,6 +360,15 @@ class AFPModule(nn.Module):
             "dnn_mask": dnn_mask,
             "partition_entropy": self._partition_entropy,
         }
+
+    @staticmethod
+    def _is_fx_proxy(tensor):
+        """Check if tensor is an FX Proxy (during symbolic tracing)."""
+        try:
+            # FX Proxy objects have a 'tracer' attribute
+            return hasattr(tensor, "tracer")
+        except Exception:
+            return False
 
     @torch.no_grad()
     def get_partition_summary(self, partition_prob: torch.Tensor) -> Dict[str, float]:
