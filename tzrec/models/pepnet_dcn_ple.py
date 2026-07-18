@@ -997,7 +997,7 @@ class PEPNetDCNPLE(MultiTaskRank):
         if self._afp_per_task_enabled and self.afp_modules_by_task:
             afp_list = list(self.afp_modules_by_task.values())
         elif self.afp_module is not None:
-            afp_list = [self._afp_module]
+            afp_list = [self.afp_module]
 
         if self._afp_enabled and afp_list:
             # Skip FX tracing: _partition_entropy may be Proxy, causing
