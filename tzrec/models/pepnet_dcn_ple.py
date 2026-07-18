@@ -9,6 +9,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -288,6 +289,9 @@ class PEPNetDCNPLE(MultiTaskRank):
         )
         self.afp_modules_by_task = nn.ModuleDict()
         if self._afp_per_task_enabled and self._afp_enabled:
+            # In per-task mode, skip shared afp_module to avoid zombie module
+            # (its forward() is never called, wasting GPU memory).
+            self.afp_module = None
             for tower_cfg in self._task_tower_cfgs:
                 task_name = tower_cfg.tower_name
                 task_afp = AFPModule(
@@ -300,6 +304,17 @@ class PEPNetDCNPLE(MultiTaskRank):
                     entropy_reg_weight=self._afp_entropy_reg_weight,
                 )
                 self.afp_modules_by_task[task_name] = task_afp
+        elif self._afp_enabled:
+            # Shared AFP mode: create shared module only
+            self.afp_module = AFPModule(
+                feature_dims=self._afp_feature_dims,
+                mode=self._afp_mode,
+                hidden_units=self._afp_hidden_units,
+                temperature=self._afp_temperature,
+                min_temperature=self._afp_min_temperature,
+                gate_temperature=self._afp_gate_temperature,
+                entropy_reg_weight=self._afp_entropy_reg_weight,
+            )
 
         # --- PLE ExtractionNet layers ---
         self._extraction_nets = nn.ModuleList()
@@ -725,7 +740,9 @@ class PEPNetDCNPLE(MultiTaskRank):
         gate_input_for_ppnet = None
         _partition_prob = None
         _afp_result_by_task = {}
-        if self._afp_enabled and self.afp_module is not None:
+        if self._afp_enabled and (
+            self.afp_module is not None or self.afp_modules_by_task
+        ):
             lhuc_features = grouped_features[self._lhuc_group_name]
             if self._afp_per_task_enabled:
                 # Task-specific AFP: each task gets its own partition
@@ -953,15 +970,6 @@ class PEPNetDCNPLE(MultiTaskRank):
 
         return result
 
-    def clear_task_gradients(self) -> None:
-        """Clear collected gradients after monitoring.
-
-        Must be called after compute_gradient_conflict() to reset
-        for the next backward pass.
-        """
-        for task_name in self._task_gradients:
-            self._task_gradients[task_name] = None
-
     def loss(
         self, predictions: Dict[str, torch.Tensor], batch: Batch
     ) -> Dict[str, torch.Tensor]:
@@ -980,38 +988,36 @@ class PEPNetDCNPLE(MultiTaskRank):
         # --- AFP Partition Entropy Regularization ---
         # Applied during training to encourage feature exploration.
         # Weight decays from entropy_reg_weight → 0 over training steps.
+        # In per-task mode, self.afp_module is None; use task AFP instead.
+        effective_afp = (
+            next(iter(self.afp_modules_by_task.values()), None)
+            if self._afp_per_task_enabled and self.afp_modules_by_task
+            else self.afp_module
+        )
         if (
             self._afp_enabled
-            and self.afp_module is not None
-            and self.afp_module.entropy_reg_weight > 0
+            and effective_afp is not None
+            and effective_afp.entropy_reg_weight > 0
         ):
-            # In per-task mode, shared afp_module forward() is never called,
-            # so _partition_entropy stays None. Use first task AFP instead.
-            if self._afp_per_task_enabled and self.afp_modules_by_task:
-                first_task_afp = next(iter(self.afp_modules_by_task.values()))
-                entropy = getattr(first_task_afp, "_partition_entropy", None)
-            else:
-                entropy = getattr(self.afp_module, "_partition_entropy", None)
+            entropy = getattr(effective_afp, "_partition_entropy", None)
             if entropy is None:
-                import logging
-
                 logging.warning(
                     "AFP entropy_reg skipped: _partition_entropy is None. "
                     "entropy_reg_weight=%.4f, training=%s",
-                    self.afp_module.entropy_reg_weight,
-                    self.afp_module.training,
+                    effective_afp.entropy_reg_weight,
+                    effective_afp.training,
                 )
             if entropy is not None:
                 # Compute annealed weight based on current temperature schedule
-                current_temp = self.afp_module.current_temperature()
+                current_temp = effective_afp.current_temperature()
                 temp_progress = 1.0 - (
-                    (current_temp - self.afp_module.min_temperature)
+                    (current_temp - effective_afp.min_temperature)
                     / max(
-                        self.afp_module.temperature - self.afp_module.min_temperature,
+                        effective_afp.temperature - effective_afp.min_temperature,
                         1e-6,
                     )
                 )
-                annealed_weight = self.afp_module.entropy_reg_weight * (
+                annealed_weight = effective_afp.entropy_reg_weight * (
                     1.0 - temp_progress * 0.8
                 )
                 if annealed_weight > 1e-6:
@@ -1022,7 +1028,8 @@ class PEPNetDCNPLE(MultiTaskRank):
                             ref_device = v.device
                             break
                     losses["afp_entropy_reg"] = (
-                        torch.tensor(entropy, device=ref_device) * annealed_weight
+                        torch.tensor(entropy, dtype=torch.float32, device=ref_device)
+                        * annealed_weight
                     )
 
         # --- Calibration Loss (CaliCausalRank-inspired) ---
