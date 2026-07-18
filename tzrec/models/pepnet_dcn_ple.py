@@ -985,7 +985,13 @@ class PEPNetDCNPLE(MultiTaskRank):
             and self.afp_module is not None
             and self.afp_module.entropy_reg_weight > 0
         ):
-            entropy = getattr(self.afp_module, "_partition_entropy", None)
+            # In per-task mode, shared afp_module forward() is never called,
+            # so _partition_entropy stays None. Use first task AFP instead.
+            if self._afp_per_task_enabled and self.afp_modules_by_task:
+                first_task_afp = next(iter(self.afp_modules_by_task.values()))
+                entropy = getattr(first_task_afp, "_partition_entropy", None)
+            else:
+                entropy = getattr(self.afp_module, "_partition_entropy", None)
             if entropy is None:
                 import logging
 
