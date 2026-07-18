@@ -71,3 +71,66 @@
 - 如果任何内容被静默跳过，"已完成"就是错误的。
 - 如果有任何测试被跳过，"测试通过"就是错误的。
 - 默认暴露不确定性，而非隐藏它。
+
+______________________________________________________________________
+
+## 实验决策记录
+
+### DECISION: 不需要多 Epoch 验证校准实验趋势稳定
+
+- 基线单 Epoch 后已开始过拟合，多 Epoch 无意义
+
+### BUG FIX: set_current_step 在 epoch-based 训练下从未被调用 (2026-07-17)
+
+**根因：** `set_current_step()` 调用被 `use_step` 条件守卫，但所有实验配置使用 `num_epochs: 1` 而非 `num_steps`，导致 `use_step = False`。
+
+**修复：** 去掉 `use_step` 条件，仅保留 `hasattr` 向后兼容检查。
+
+**影响：** 修复前方案 B/D 的 calibration_loss 始终为 0（\_current_step 始终为 0，schedule 返回 0.0 权重）。修复后 progressive schedule 真正生效。
+
+**注意：** `anneal_temperature` 同样受 `use_step` 守卫，但 AFP 温度调度是已有功能，暂不改动。
+
+### BUG FIX: FX tracing 期间 Proxy 变量不可用于控制流 (2026-07-18)
+
+**现象：** `torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow`
+
+**根因：** PipelineParallel 训练和 model export 阶段会调用 FX symbolic trace 对 `forward()` 进行图追踪。追踪期间，所有 tensor 运算结果变成 `Proxy` 对象，**不能用于 `if/while/for` 控制流判断**（如 `if total_entropy > 0:`、`if ent is not None:` 等）。
+
+**常见触发场景：**
+
+1. 在 `loss()` 方法中累加 tensor 值后做 `if > 0:` 判断
+1. 在 `loss()` 方法中使用 `getattr` 获取 tensor 属性后判断 `is not None`
+1. 在 `forward()` 方法中访问 `scaler.get_temperature().item()`（已有 `isinstance(Proxy)` guard 的除外）
+
+**修复原则：**
+
+- **外层 guard 优先：** 将 `is_fx_tracing()` 检查放在**整个涉及 tensor 比较/累加的代码块外层**，而不是内部某一行。内层 guard 太晚——Proxy 已经在前面被创建/累加了。
+- **已有模式参考：** calibration loss 和 contrastive loss 中使用 `isinstance(x, torch.fx.Proxy)` 检查后 `break`，这是正确的做法。
+- **import：** `from torch.fx._symbolic_trace import is_fx_tracing`
+
+**反面示例（错误）：**
+
+```python
+# ❌ 内层 guard 太晚——total_entropy 已经是 Proxy
+total_entropy += ent  # ← Proxy 在这里产生
+if not is_fx_tracing():  # ← 太晚了！
+    if total_entropy > 0:  # ← TraceError!
+```
+
+**正面示例（正确）：**
+
+```python
+# ✅ 外层 guard 完全跳过 Proxy 区域
+if not is_fx_tracing():
+    total_entropy = 0.0
+    for afp_mod in afp_list:
+        ent = getattr(afp_mod, "_partition_entropy", None)
+        total_entropy += ent
+    if total_entropy > 0:  # ← 正常 float 比较，安全
+```
+
+**经验教训：**
+
+- 每次在 `loss()` 或 `forward()` 中引入涉及 tensor 运算+控制流的代码时，第一时间考虑 FX tracing 兼容性
+- 不要只 guard `torch.tensor()` 那一行——整个计算链都需要被保护
+- `is_fx_tracing()` 检查应该包裹**整个**可能产生 Proxy 的代码块
