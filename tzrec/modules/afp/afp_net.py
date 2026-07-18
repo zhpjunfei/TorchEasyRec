@@ -305,7 +305,11 @@ class AFPModule(nn.Module):
         # Encourages exploration in early training by penalizing overly confident
         # partitions. Weight anneals from entropy_reg_weight → 0 over training.
         self._partition_entropy = None
-        if self.entropy_reg_weight > 0 and self.training:
+        if (
+            self.entropy_reg_weight > 0
+            and self.training
+            and not self._is_fx_proxy(partition_probs)
+        ):
             p = partition_probs.clamp(1e-7, 1 - 1e-7)
             log_p = torch.log(p)
             entropy = -(p * log_p + (1 - p) * torch.log(1 - p + 1e-7)).mean()
