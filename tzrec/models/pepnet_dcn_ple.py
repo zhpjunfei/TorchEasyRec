@@ -1028,7 +1028,7 @@ class PEPNetDCNPLE(MultiTaskRank):
                             ref_device = v.device
                             break
                     losses["afp_entropy_reg"] = (
-                        torch.tensor(entropy, dtype=torch.float32, device=ref_device)
+                        torch.as_tensor(entropy, dtype=torch.float32).to(ref_device)
                         * annealed_weight
                     )
 
