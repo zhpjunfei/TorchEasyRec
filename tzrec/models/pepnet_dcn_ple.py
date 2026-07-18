@@ -1000,40 +1000,40 @@ class PEPNetDCNPLE(MultiTaskRank):
             afp_list = [self._afp_module]
 
         if self._afp_enabled and afp_list:
-            total_entropy = 0.0
-            entropy_reg_weights = []
-            temps = []
-            for afp_mod in afp_list:
-                ent = getattr(afp_mod, "_partition_entropy", None)
-                if ent is None:
-                    logging.warning(
-                        "AFP entropy_reg skipped: _partition_entropy is None for "
-                        "%s. entropy_reg_weight=%.4f, training=%s",
-                        getattr(afp_mod, "_task_name", "unknown"),
-                        afp_mod.entropy_reg_weight,
-                        afp_mod.training,
+            # Skip FX tracing: _partition_entropy may be Proxy, causing
+            # control flow errors on "if total_entropy > 0:" and comparisons.
+            if not is_fx_tracing():
+                total_entropy = 0.0
+                entropy_reg_weights = []
+                temps = []
+                for afp_mod in afp_list:
+                    ent = getattr(afp_mod, "_partition_entropy", None)
+                    if ent is None:
+                        logging.warning(
+                            "AFP entropy_reg skipped: _partition_entropy is None for "
+                            "%s. entropy_reg_weight=%.4f, training=%s",
+                            getattr(afp_mod, "_task_name", "unknown"),
+                            afp_mod.entropy_reg_weight,
+                            afp_mod.training,
+                        )
+                        continue
+                    total_entropy += ent
+                    entropy_reg_weights.append(afp_mod.entropy_reg_weight)
+                    temps.append(afp_mod.current_temperature())
+
+                if total_entropy > 0:
+                    # Use mean weight and min temperature across tasks
+                    mean_weight = sum(entropy_reg_weights) / len(entropy_reg_weights)
+                    # Compute annealed weight using the first (or shared) AFP schedule
+                    current_temp = temps[0] if temps else 1.0
+                    min_temp = afp_list[0].min_temperature if temps else 0.1
+                    shared_temp = afp_list[0].temperature if temps else 1.0
+                    temp_progress = 1.0 - (
+                        (current_temp - min_temp) / max(shared_temp - min_temp, 1e-6)
                     )
-                    continue
-                total_entropy += ent
-                entropy_reg_weights.append(afp_mod.entropy_reg_weight)
-                temps.append(afp_mod.current_temperature())
+                    annealed_weight = mean_weight * (1.0 - temp_progress * 0.8)
 
-            if total_entropy > 0:
-                # Use mean weight and min temperature across tasks
-                mean_weight = sum(entropy_reg_weights) / len(entropy_reg_weights)
-                # Compute annealed weight using the first (or shared) AFP schedule
-                current_temp = temps[0] if temps else 1.0
-                min_temp = afp_list[0].min_temperature if temps else 0.1
-                shared_temp = afp_list[0].temperature if temps else 1.0
-                temp_progress = 1.0 - (
-                    (current_temp - min_temp) / max(shared_temp - min_temp, 1e-6)
-                )
-                annealed_weight = mean_weight * (1.0 - temp_progress * 0.8)
-
-                if annealed_weight > 1e-6:
-                    # Skip FX tracing: torch.tensor(scalar, device=...) fails
-                    # during symbolic tracing (cuda_array_interface error)
-                    if not is_fx_tracing():
+                    if annealed_weight > 1e-6:
                         ref_device = "cpu"
                         for _k, v in losses.items():
                             if isinstance(v, torch.Tensor):
