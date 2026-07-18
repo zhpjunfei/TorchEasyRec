@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.fx._symbolic_trace import is_fx_tracing
 
 from tzrec.datasets.utils import Batch
 from tzrec.features.feature import BaseFeature
@@ -1021,18 +1022,20 @@ class PEPNetDCNPLE(MultiTaskRank):
                     1.0 - temp_progress * 0.8
                 )
                 if annealed_weight > 1e-6:
-                    # Find any loss tensor to get the device
-                    ref_device = "cpu"
-                    for _k, v in losses.items():
-                        if isinstance(v, torch.Tensor):
-                            ref_device = v.device
-                            break
-                    entropy_tensor = torch.tensor(
-                        entropy, dtype=torch.float32, device="cpu"
-                    )
-                    if ref_device.type != "cpu":
-                        entropy_tensor = entropy_tensor.to(ref_device)
-                    losses["afp_entropy_reg"] = entropy_tensor * annealed_weight
+                    # Skip FX tracing: torch.tensor(scalar, device=...) fails
+                    # during symbolic tracing (cuda_array_interface error)
+                    if not is_fx_tracing():
+                        ref_device = "cpu"
+                        for _k, v in losses.items():
+                            if isinstance(v, torch.Tensor):
+                                ref_device = v.device
+                                break
+                        entropy_tensor = torch.tensor(
+                            entropy, dtype=torch.float32, device="cpu"
+                        )
+                        if ref_device.type != "cpu":
+                            entropy_tensor = entropy_tensor.to(ref_device)
+                        losses["afp_entropy_reg"] = entropy_tensor * annealed_weight
 
         # --- Calibration Loss (CaliCausalRank-inspired) ---
         if (
