@@ -1027,10 +1027,12 @@ class PEPNetDCNPLE(MultiTaskRank):
                         if isinstance(v, torch.Tensor):
                             ref_device = v.device
                             break
-                    losses["afp_entropy_reg"] = (
-                        torch.as_tensor(entropy, dtype=torch.float32).to(ref_device)
-                        * annealed_weight
+                    entropy_tensor = torch.tensor(
+                        entropy, dtype=torch.float32, device="cpu"
                     )
+                    if ref_device.type != "cpu":
+                        entropy_tensor = entropy_tensor.to(ref_device)
+                    losses["afp_entropy_reg"] = entropy_tensor * annealed_weight
 
         # --- Calibration Loss (CaliCausalRank-inspired) ---
         if (
