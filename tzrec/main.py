@@ -453,8 +453,36 @@ def _train_and_evaluate(
                     ):
                         _afp_temp = _model.afp_temperature()
                         if _afp_temp is not None:
+                            if isinstance(_afp_temp, dict):
+                                # Per-task mode: log each task's temperature
+                                for task_name, temp_val in _afp_temp.items():
+                                    summary_writer.add_scalar(
+                                        f"afp_temperature/{task_name}",
+                                        temp_val,
+                                        i_step,
+                                    )
+                            else:
+                                summary_writer.add_scalar(
+                                    "afp_temperature", _afp_temp, i_step
+                                )
+
+                # --- Gradient conflict monitoring (APPNet) ---
+                if (
+                    hasattr(_model, "compute_gradient_conflict")
+                    and i_step % train_config.log_step_count_steps == 0
+                    and summary_writer is not None
+                ):
+                    grad_conflict = _model.compute_gradient_conflict()
+                    for k, v in grad_conflict.items():
+                        if isinstance(v, bool):
                             summary_writer.add_scalar(
-                                "afp_temperature", _afp_temp, i_step
+                                f"gradient_conflict/{k}",
+                                int(v),
+                                i_step,
+                            )
+                        elif isinstance(v, float):
+                            summary_writer.add_scalar(
+                                f"gradient_conflict/{k}", v, i_step
                             )
 
                 # --- Progressive calibration step notification ---

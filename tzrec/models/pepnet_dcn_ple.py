@@ -919,16 +919,18 @@ class PEPNetDCNPLE(MultiTaskRank):
         for task_afp in self.afp_modules_by_task.values():
             task_afp.anneal_temperature(step, total_steps, exp_decay=exp_decay)
 
-    def afp_temperature(self) -> Optional[float]:
+    def afp_temperature(self):
         """Return current AFP temperature for logging.
 
-        In per-task mode, returns the temperature of the first task AFP.
-        Falls back to shared AFP temperature if per-task is not enabled.
+        In per-task mode, returns a dict mapping task_name -> temperature.
+        In shared mode, returns a float temperature.
         Returns None if no AFP module is active.
         """
         if self._afp_per_task_enabled and self.afp_modules_by_task:
-            first_task = next(iter(self.afp_modules_by_task.values()))
-            return first_task.current_temperature()
+            return {
+                name: task_afp.current_temperature()
+                for name, task_afp in self.afp_modules_by_task.items()
+            }
         if self.afp_module is not None:
             return self.afp_module.current_temperature()
         return None
@@ -989,38 +991,45 @@ class PEPNetDCNPLE(MultiTaskRank):
         # --- AFP Partition Entropy Regularization ---
         # Applied during training to encourage feature exploration.
         # Weight decays from entropy_reg_weight → 0 over training steps.
-        # In per-task mode, self.afp_module is None; use task AFP instead.
-        effective_afp = (
-            next(iter(self.afp_modules_by_task.values()), None)
-            if self._afp_per_task_enabled and self.afp_modules_by_task
-            else self.afp_module
-        )
-        if (
-            self._afp_enabled
-            and effective_afp is not None
-            and effective_afp.entropy_reg_weight > 0
-        ):
-            entropy = getattr(effective_afp, "_partition_entropy", None)
-            if entropy is None:
-                logging.warning(
-                    "AFP entropy_reg skipped: _partition_entropy is None. "
-                    "entropy_reg_weight=%.4f, training=%s",
-                    effective_afp.entropy_reg_weight,
-                    effective_afp.training,
-                )
-            if entropy is not None:
-                # Compute annealed weight based on current temperature schedule
-                current_temp = effective_afp.current_temperature()
-                temp_progress = 1.0 - (
-                    (current_temp - effective_afp.min_temperature)
-                    / max(
-                        effective_afp.temperature - effective_afp.min_temperature,
-                        1e-6,
+        # In per-task mode, sum entropy from ALL task AFPs (not just first).
+        # In shared mode, use self.afp_module.
+        afp_list = []
+        if self._afp_per_task_enabled and self.afp_modules_by_task:
+            afp_list = list(self.afp_modules_by_task.values())
+        elif self.afp_module is not None:
+            afp_list = [self._afp_module]
+
+        if self._afp_enabled and afp_list:
+            total_entropy = 0.0
+            entropy_reg_weights = []
+            temps = []
+            for afp_mod in afp_list:
+                ent = getattr(afp_mod, "_partition_entropy", None)
+                if ent is None:
+                    logging.warning(
+                        "AFP entropy_reg skipped: _partition_entropy is None for "
+                        "%s. entropy_reg_weight=%.4f, training=%s",
+                        getattr(afp_mod, "_task_name", "unknown"),
+                        afp_mod.entropy_reg_weight,
+                        afp_mod.training,
                     )
+                    continue
+                total_entropy += ent
+                entropy_reg_weights.append(afp_mod.entropy_reg_weight)
+                temps.append(afp_mod.current_temperature())
+
+            if total_entropy > 0:
+                # Use mean weight and min temperature across tasks
+                mean_weight = sum(entropy_reg_weights) / len(entropy_reg_weights)
+                # Compute annealed weight using the first (or shared) AFP schedule
+                current_temp = temps[0] if temps else 1.0
+                min_temp = afp_list[0].min_temperature if temps else 0.1
+                shared_temp = afp_list[0].temperature if temps else 1.0
+                temp_progress = 1.0 - (
+                    (current_temp - min_temp) / max(shared_temp - min_temp, 1e-6)
                 )
-                annealed_weight = effective_afp.entropy_reg_weight * (
-                    1.0 - temp_progress * 0.8
-                )
+                annealed_weight = mean_weight * (1.0 - temp_progress * 0.8)
+
                 if annealed_weight > 1e-6:
                     # Skip FX tracing: torch.tensor(scalar, device=...) fails
                     # during symbolic tracing (cuda_array_interface error)
@@ -1031,7 +1040,7 @@ class PEPNetDCNPLE(MultiTaskRank):
                                 ref_device = v.device
                                 break
                         entropy_tensor = torch.tensor(
-                            entropy, dtype=torch.float32, device="cpu"
+                            total_entropy, dtype=torch.float32, device="cpu"
                         )
                         if ref_device.type != "cpu":
                             entropy_tensor = entropy_tensor.to(ref_device)
