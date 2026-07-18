@@ -986,6 +986,15 @@ class PEPNetDCNPLE(MultiTaskRank):
             and self.afp_module.entropy_reg_weight > 0
         ):
             entropy = getattr(self.afp_module, "_partition_entropy", None)
+            if entropy is None:
+                import logging
+
+                logging.warning(
+                    "AFP entropy_reg skipped: _partition_entropy is None. "
+                    "entropy_reg_weight=%.4f, training=%s",
+                    self.afp_module.entropy_reg_weight,
+                    self.afp_module.training,
+                )
             if entropy is not None:
                 # Compute annealed weight based on current temperature schedule
                 current_temp = self.afp_module.current_temperature()
