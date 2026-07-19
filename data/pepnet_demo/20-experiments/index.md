@@ -22,6 +22,8 @@ ______________________________________________________________________
 | v14  | \[[v14-experiments]\]             | out_task_space_weight 全扫描完结     | ✅ completed |
 | v14  | \[[v14-optimization-plan]\]       | 路线图（Round 1，已被 codex 版取代） |  superseded  |
 | v15  | \[[v14-optimization-plan-codex]\] | Codex 深度审查版路线图（UV 级优化）  |    draft     |
+| v15  | [[calibration-calicaustralrank]] | CaliCausalRank 温度校准模块集成      |    active    |
+| v15  | [[calibration-physics-meaning]] | 校准每一步的物理意义与精排影响    |    draft     |
 
 ## 基础设施实验
 

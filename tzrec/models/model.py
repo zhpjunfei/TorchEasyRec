@@ -296,11 +296,10 @@ class TrainWrapper(BaseModule):
                 flush=True,
             )
         self.pcgrad = None
-        if (
-            hasattr(self.model, "_use_pcgrad")
-            and self.model._use_pcgrad
-        ):
-            self.pcgrad = PCGradLoss()
+        if hasattr(self.model, "_use_pcgrad") and self.model._use_pcgrad:
+            self.pcgrad = PCGradLoss(
+                asymmetric=True
+            )  # CVR-priority: only project CTR->CVR, never CVR->CTR
 
         self._uw_first_call = True
 
