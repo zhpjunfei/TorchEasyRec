@@ -1,0 +1,99 @@
+SET odps.sql.type.system.odps2 = true
+;
+
+WITH user_active AS
+(
+    SELECT  mmb_id
+            ,COUNT(DISTINCT dt) AS user_active_days
+    FROM    home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_v1de
+    WHERE   dt > TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-60,'dd'),'yyyymmdd')
+    AND     dt <= '${bdp.system.bizdate}' and (ARRAY_CONTAINS(f_req_page,'1w_tab_f_index_content') or ARRAY_CONTAINS(f_req_page,'1zhekoutuijian') )
+    GROUP BY mmb_id
+)
+,avg_active AS
+(
+    SELECT  AVG(CAST(user_active_days AS DOUBLE)) AS avg_active_days
+    FROM    user_active
+)
+-- price_bias: 先对 distinct(__mmb_id__, spu_id[0], current_price) 计算 dense_rank,
+-- 再回 JOIN 赋值。dense_rank 只取决于同一分区内价格的相对顺序,
+-- 因此在去重后的价格集合上排名与在全量行上排名完全等价, 但排序/shuffle 数据量大幅下降。
+,spu_price_distinct AS
+(
+    SELECT  DISTINCT
+            __mmb_id__
+            ,spu_id[0] AS spu_id
+            ,current_price
+    FROM    home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_v1de
+    WHERE   dt > TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-60,'dd'),'yyyymmdd')
+    AND     dt <= '${bdp.system.bizdate}'
+)
+,spu_price_rank AS
+(
+    SELECT  __mmb_id__
+            ,spu_id
+            ,current_price
+            ,DENSE_RANK() OVER (PARTITION BY __mmb_id__, spu_id ORDER BY current_price DESC) AS price_bias
+    FROM    spu_price_distinct
+)
+-- item_trend_bias: 只在新帖(pub_hours_fg[0] <= 5.0)上, 按 __mmb_id__ 对 item__cnt_click_rt3h 做 dense_rank(参照 price_bias)。
+-- 非新帖统一取 1.0。以 (__mmb_id__, __item_id__, item__cnt_click_rt3h) 去重, 再回 LEFT JOIN 赋值, 避免窗口函数跑全量。
+,new_item_trend_distinct AS
+(
+    SELECT  DISTINCT
+            __mmb_id__
+            ,__item_id__
+            ,item__cnt_click_rt3h
+    FROM    home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_v1de
+    WHERE   dt > TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-60,'dd'),'yyyymmdd')
+    AND     dt <= '${bdp.system.bizdate}'
+    AND     pub_hours_fg[0] <= 5.0
+)
+,item_trend_rank AS
+(
+    SELECT  __mmb_id__
+            ,__item_id__
+            ,item__cnt_click_rt3h
+            ,DENSE_RANK() OVER (PARTITION BY __mmb_id__ ORDER BY item__cnt_click_rt3h DESC) AS trend_rank
+    FROM    new_item_trend_distinct
+)
+INSERT OVERWRITE TABLE home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v1df PARTITION (dt = '${bdp.system.bizdate}')
+SELECT  /*+ MAPJOIN(av) */
+        a.`(dt)?+.+`
+        ,CAST(CASE   WHEN DATEDIFF(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),TO_DATE(dt,'yyyymmdd')) <= 14 THEN 1.0
+                ELSE 1.0 - 0.7 * (
+                    DATEDIFF(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),TO_DATE(dt,'yyyymmdd')) - 14
+        ) / 46.0
+        END AS FLOAT) AS date_weight
+        ,CAST(LEAST(round(COALESCE(ua.user_active_days / NULLIF(av.avg_active_days,0),0.0) + 1.0,6),5.0) AS FLOAT) AS user_weight
+        ,CAST(COALESCE(spr.price_bias, 1.0) AS FLOAT) AS price_bias
+        ,CAST(CASE WHEN a.pub_hours_fg[0] <= 5.0 THEN itr.trend_rank ELSE 1.0 END AS FLOAT) AS item_trend_bias
+        ,CAST(CASE   WHEN ARRAY_CONTAINS(f_req_page,'1w_tab_f_index_content') THEN 1.0
+                WHEN ARRAY_CONTAINS(f_req_page,'1zhekoutuijian') THEN 1.0
+                ELSE 0.3
+        END AS FLOAT) AS scence_weight
+        ,CAST((
+              IF(SIZE(ARRAY_INTERSECT(a.chaprice_click_50_seq__brand, a.brand)) > 0, 4.0, 1.0)
+            + IF(SIZE(ARRAY_INTERSECT(a.chaprice_click_50_seq__third_cate_id, a.third_cate_id)) > 0, 3.0, 1.0)
+            + IF(SIZE(ARRAY_INTERSECT(a.click_50_seq__brand, a.brand)) > 0, 5.0, 1.0)
+            + IF(SIZE(ARRAY_INTERSECT(a.click_50_seq__third_cate_id, a.third_cate_id)) > 0, 5.0, 1.0)
+            + IF(SIZE(ARRAY_INTERSECT(a.search_click_50_seq__brand, a.brand)) > 0, 3.0, 1.0)
+            + IF(SIZE(ARRAY_INTERSECT(a.search_click_50_seq__third_cate_id, a.third_cate_id)) > 0, 2.0, 1.0)
+        ) / 6.0 AS FLOAT) AS math_bias
+FROM    home_flow_2604_ctrcvr_sorter_config_pyfg_encoded_v1de a
+left JOIN    user_active ua
+ON      a.mmb_id = ua.mmb_id
+CROSS JOIN avg_active av
+LEFT JOIN spu_price_rank spr
+ON      a.__mmb_id__ = spr.__mmb_id__
+AND     a.spu_id[0] = spr.spu_id
+AND     a.current_price = spr.current_price
+left JOIN item_trend_rank itr
+ON      a.__mmb_id__ = itr.__mmb_id__
+AND     a.__item_id__ = itr.__item_id__
+AND     a.item__cnt_click_rt3h = itr.item__cnt_click_rt3h
+WHERE   a.dt > TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'),-60,'dd'),'yyyymmdd')
+AND     a.dt <= '${bdp.system.bizdate}'
+DISTRIBUTE BY RAND()
+SORT BY RAND()
+;

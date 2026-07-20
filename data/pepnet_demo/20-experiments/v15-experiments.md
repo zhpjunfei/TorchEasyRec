@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-07-02 tags: [experiment, v15, like-seq, chaprice-seq, tag-seq, cdot] status: ongoing related: \["[v15-config-variants]"\]
+## date: 2026-07-02 tags: [experiment, v15, like-seq, chaprice-seq, tag-seq, cdot] status: ongoing related: \["[v15-config-variants]"\], "\[[calibration-calicaustralrank]\]"
 
 # v15 实验分析：LIKE/CHAPRICE 序列处理方式 + CDOT output_dim/seq_transformer 初步探索
 
@@ -565,7 +565,7 @@ if hasattr(_model, "set_current_step"):
 | 1 | **修复 B** | 在 trainer 中调用 `model.set_current_step()` | calibration_loss 生效 |
 | 2 | **方案 D** | A+B 融合：T=1.5, weight=0.02, progressive="2000:0.0,4000:0.02,6000:0.03", cvr_only | CVR AUC +1~3% |
 | 3 | **T 扫描** | initial_temperature ∈ {1.2, 1.5, 2.0, 2.5} | 找最优软化系数 |
-| 4 | **多 Epoch** | 训练 3+ epochs 验证趋势稳定性 | 确认长期效果 |
+| ~~4~~ | ~~多 Epoch~~ | ~~训练 3+ epochs 验证趋势稳定性~~ | ~~确认长期效果~~ | ~~取消~~ |
 
 ### 决策逻辑
 
@@ -576,3 +576,103 @@ A 方案 T=1.5 正向 → 扫描 T 值找最优
 ```
 
 ______________________________________________________________________
+
+______________________________________________________________________
+
+## date: 2026-07-17 tags: [calibration, consensus, validation-strategy] status: resolved
+
+# 校准实验：验证策略共识
+
+## 决策
+
+**不需要多 Epoch 验证校准实验的趋势稳定性。**
+
+## 理由
+
+1. **基线已过拟合** — 历史经验表明单 Epoch 后基线就开始过拟合，多 Epoch 验证的意义不大
+1. **校准是轻量级正则化** — calibration weight 仅 0.02-0.05，对过拟合节奏的影响可忽略
+1. **Epoch 0 AUC 趋势已足够判断方向** — 校准的效果是即时性的（温度缩放直接影响概率分布），不需要等待长期收敛
+
+## 适用条件
+
+以下情况才需要额外 Epoch 验证：
+
+- 方案 B 修复 `set_current_step` 后重新实验（原 Epoch 0 数据因 bug 无效，需确认 progressive schedule 真正生效）
+- 方案 A 和方案 D 的 Epoch 0 结果出现**方向矛盾**（如一个正向一个负向），此时需要第 2 epoch 确认信号强度
+- 否则，单 Epoch 的 AUC 趋势已足以做出"go/no-go"决策
+
+## 后续计划（更新版）
+
+| 序号  | 实验         | 内容                                                                               |                    预期                     |  优先级  |
+| :---: | ------------ | ---------------------------------------------------------------------------------- | :-----------------------------------------: | :------: |
+|   1   | **修复 B**   | 重新跑方案 B（含 `use_step` guard + schedule 预解析优化）                          | calibration_loss > 0，验证 progressive 生效 |    P0    |
+|   2   | **方案 D**   | A+B 融合：T=1.5, weight=0.02, progressive="2000:0.0,4000:0.02,6000:0.03", cvr_only |                CVR AUC +1~3%                |    P0    |
+|   3   | **T 扫描**   | initial_temperature ∈ {1.2, 1.5, 2.0, 2.5}                                         |               找最优软化系数                |    P1    |
+| ~~4~~ | ~~多 Epoch~~ | ~~训练 3+ epochs 验证趋势稳定性~~                                                  |              ~~确认长期效果~~               | ~~取消~~ |
+
+## 代码变更确认
+
+以下改进已就绪但尚未提交：
+
+- `tzrec/main.py`: 添加 `use_step` guard（与 `anneal_temperature` 一致）
+- `tzrec/models/pepnet_dcn_ple.py`: schedule 预解析缓存（O(1) runtime lookup）
+
+______________________________________________________________________
+
+## date: 2026-07-17 tags: [calibration, bugfix, progressive-schedule] status: resolved
+
+# Bug: 方案 B/D 的 calibration_loss=0 根因 — use_step 守卫导致 set_current_step 从未被调用
+
+## 现象
+
+7.16 号的实验结果：
+
+- 方案 B progressive: calibration_loss=0.00000, auc_cvr=0.75376 (vs baseline 0.75390)
+- 方案 D fusion: calibration_loss=0.00000, auc_cvr=0.75386 (vs baseline 0.75390)
+
+两个方案的效果几乎等于 baseline，calibration_loss 始终为 0。
+
+## 根因分析
+
+```python
+# tzrec/main.py:458
+if use_step and hasattr(_model, "set_current_step"):  # ← use_step 是罪魁祸首
+    _model.set_current_step(i_step)
+```
+
+`use_step = train_config.num_steps and train_config.num_steps > 0`
+
+但所有实验配置使用 `num_epochs: 1`，没有设置 `num_steps`，所以：
+
+- `train_config.num_steps = 0`
+- `use_step = False`
+- `set_current_step(i_step)` **从未被调用**
+- `_current_step` 始终为初始值 `0`
+- `_get_current_calibration_weight(0)` 返回 `schedule[0][1] = 0.0`（第一步权重）
+- `calibration_loss = total_calib_loss * 0.0 = 0`
+
+**这就是为什么 7.16 方案 B 的 calibration_loss 也是 0——不是同一个 bug，是同一个根因的延续。** 之前 `eec463b` 的修复加了 `use_step and` 条件，反而让它在 epoch-based 训练下彻底失效。
+
+## 修复
+
+去掉 `use_step` 条件，`i_step` 在 epoch-based 模式下也是递增的 step counter（`itertools.count(0)`）：
+
+```python
+# Before:
+if use_step and hasattr(_model, "set_current_step"):
+    _model.set_current_step(i_step)
+
+# After:
+if hasattr(_model, "set_current_step"):
+    _model.set_current_step(i_step)
+```
+
+## 重新实验结果
+
+修复后需要重新跑方案 B 和 D，预期 calibration_loss 不再为 0，progressive schedule 真正生效。
+
+## 教训
+
+- `use_step` 守卫在 epoch-based 训练配置下会静默禁用所有 step-dependent 功能
+- 新增的 step-based 回调函数必须检查训练的 step/epoch 模式
+- 单元测试无法覆盖此 bug（测试用 tensor 直接调用，不走 trainer loop）

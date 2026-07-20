@@ -1,0 +1,46 @@
+# 优化配置说明
+
+## 变更摘要
+
+基于 `home_flow_2604_v15_baseline.config` 创建，主要变更如下：
+
+### 1. CDOT compress_hidden_units 优化
+- **变更前**: `[512, 374]`
+- **变更后**: `[512, 256, 128]`
+- **原因**: 374 不是 2 的幂次，且 374→16 是 23.4 倍的单层暴缩，信息损失严重。改为渐进式降维 [512, 256, 128]，每层降维 2 倍，符合业界最佳实践。
+
+### 2. ZCH 差异化策略
+
+#### A类: 用户画像特征 (mmb_id)
+- **Policy**: LRU
+- **Interval**: 10
+- **Decay**: 1.0
+- **原因**: 用户画像相对稳定，LRU 保留最近访问的 embedding，interval=10 给予足够稳定时间
+
+#### B类: 高频 Combo 特征
+- **Features**: login_city_x_brand_fg, login_city_x_core_entity_fg, login_city_x_username_fg, brand_x_price_tag_fg, dev_brand_x_username_fg
+- **Policy**: DistanceLFU
+- **Interval**: 5
+- **Decay**: 1.0
+- **原因**: 组合空间大但实际出现频率较高，需要兼顾频率和时间，默认 decay=1.0 线性衰减
+
+#### C类: 低频 Combo 特征
+- **Features**: login_city_x_cate_id_path_fg, login_city_x_publish_user_fg, login_city_x_spu_id_fg, gender_x_spu_id_fg, dev_brand_x_spu_id_fg, brand_x_cate_id_path_fg, price_tag_x_cate_id_path_fg, price_tag_x_spu_id_fg
+- **Policy**: DistanceLFU
+- **Interval**: 2
+- **Decay**: 2.0
+- **原因**: 覆盖率极低，需要快速淘汰过时的冷启动组合，二次衰减使旧访问迅速失去影响力
+
+## 验证状态
+
+- [x] 括号平衡: 2004 开 / 2004 关
+- [x] ZCH 配置数: 14 个
+- [x] CDOT compress_hidden_units: [512, 256, 128]
+- [ ] 配置解析验证: 待运行 TorchEasyRec 验证
+- [ ] 离线训练验证: 待对比 baseline AUC
+
+## 下一步
+
+1. 验证配置可解析性: `python3 -m tzrec.train_eval --pipeline_config_path data/pepnet_demo/config/v15/home_flow_2604_v15_baseline_optimized.config`
+2. 运行离线训练，对比 CTR-AUC 和 CVR-AUC
+3. 如果效果提升，进行灰度验证

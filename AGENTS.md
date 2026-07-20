@@ -138,12 +138,14 @@ if not is_fx_tracing():
 ## PCGrad 梯度手术实现规范
 
 ### 核心原则
+
 - 所有梯度手术类（PCGrad、Pareto、UncertaintyWeight 等）必须通过 **loss key 名称** 识别任务角色，而非依赖 dict 遍历顺序。
 - 默认参数必须是显式传参，禁止依赖隐式默认值。
 - `.reshape(-1)` 而非 `.view(-1)`：DDP/TorchRec 分布式环境下梯度 tensor 可能不连续。
 - 混合精度安全：`_flatten_grads` 中 `torch.zeros` 的 dtype 必须与 `params[0].dtype` 一致。
 
 ### 典型反模式
+
 ```python
 # ❌ 依赖 dict 顺序推断任务优先级
 for i, (name, loss_val) in enumerate(losses.items()):
@@ -161,10 +163,12 @@ cvr_keys = [k for k in losses if "cvr" in k or "ctcvr" in k]
 ## PCGrad OOM 修复经验 (2026-07-20)
 
 ### 问题
+
 `retain_graph=True` 在 30GB+ 模型上 OOM。前向激活图本身占 30GB，
 `retain_graph` 阻止中间激活被释放，第二次 `autograd.grad` 时没有内存。
 
 ### 解决方案
+
 - 主路径：通过 `predict_fn` + `loss_fn` 参数，每任务重算 forward，
   backward 后立即释放激活图，peak memory = O(forward_graph)。
   开销：N 次 forward ≈ 20% 额外时间，换来 OOM 消除。
@@ -172,6 +176,7 @@ cvr_keys = [k for k in losses if "cvr" in k or "ctcvr" in k]
   仅在 `predict_fn` 不可用时使用（小模型）。
 
 ### 关键约束
+
 - `backward()` 不接受 `allow_unused` 参数，只有 `autograd.grad()` 接受。
 - DDP 下 `.reshape(-1)` 而非 `.view(-1)`（tensor 可能不连续）。
 - backward hook 中 `_patch_gradients` 必须直接赋值 `p.grad`，
