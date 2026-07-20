@@ -211,3 +211,73 @@ class PCGradLoss(nn.Module):
 
         self._hook_handle = trigger.register_hook(_patch_and_clear)
         return trigger
+
+
+class PCGradLossApprox(nn.Module):
+    """Approximate PCGrad via loss-weighting modulation.
+
+    Computes per-task gradients via autograd.grad(), detects conflicts,
+    and modulates loss weights accordingly. This is an approximation of
+    true gradient projection (faster, less memory, but not mathematically
+    identical to the Yu et al. 2020 formulation).
+
+    Compatible with large batch sizes on memory-constrained GPUs.
+    """
+
+    def __init__(self, asymmetric: bool = True) -> None:
+        super().__init__()
+        self.asymmetric = asymmetric
+
+    def forward(
+        self,
+        losses: Dict[str, torch.Tensor],
+        model: nn.Module,
+        batch: "Batch" = None,
+    ) -> torch.Tensor:
+        """Compute PCGrad-modified total loss via loss-weighting approximation.
+
+        Args:
+            losses: dict of per-task loss tensors.
+            model: the model.
+            batch: unused.
+
+        Returns:
+            total_loss: weighted sum of task losses.
+        """
+        params = [p for p in model.parameters() if p.requires_grad]
+        if not params:
+            raise ValueError("No trainable parameters found in model")
+
+        grads = []
+        for loss_val in losses.values():
+            single_loss = torch.sum(loss_val, dim=0)
+            gradients = torch.autograd.grad(
+                single_loss,
+                params,
+                retain_graph=True,
+                allow_unused=True,
+                create_graph=False,
+            )
+            grad_flattened = []
+            for grad, param in zip(gradients, params):
+                if grad is not None:
+                    grad_flattened.append(grad.reshape(-1))
+                else:
+                    grad_flattened.append(torch.zeros_like(param).reshape(-1))
+            grads.append(torch.cat(grad_flattened))
+
+        G = torch.stack(grads)
+        GGT = torch.mm(G, G.T)
+        diag = GGT.diag().clamp(min=1e-8)
+
+        eye = torch.eye(len(losses), device=GGT.device, dtype=torch.bool)
+        conflict_mask = (GGT < 0) & ~eye
+
+        penalty_ratio = GGT / diag.unsqueeze(1)
+        c = 1.0 - (penalty_ratio * conflict_mask).sum(dim=1)
+
+        total_loss = 0.0
+        for i, loss_val in enumerate(losses.values()):
+            total_loss = total_loss + c[i].detach() * loss_val.sum()
+
+        return total_loss

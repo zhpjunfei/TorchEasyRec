@@ -28,7 +28,7 @@ from tzrec.constant import TARGET_REPEAT_INTERLEAVE_KEY
 from tzrec.datasets.data_parser import DataParser
 from tzrec.datasets.utils import Batch
 from tzrec.features.feature import BaseFeature
-from tzrec.loss.pcgrad_loss import PCGradLoss
+from tzrec.loss.pcgrad_loss import PCGradLoss, PCGradLossApprox
 from tzrec.loss.pe_mtl_loss import ParetoEfficientMultiTaskLoss
 from tzrec.loss.uncertainty_weight_loss import UncertaintyWeightLoss
 from tzrec.modules.utils import BaseModule
@@ -297,9 +297,18 @@ class TrainWrapper(BaseModule):
             )
         self.pcgrad = None
         if hasattr(self.model, "_use_pcgrad") and self.model._use_pcgrad:
-            self.pcgrad = PCGradLoss(
-                asymmetric=True
-            )  # CVR-priority: only project CTR->CVR, never CVR->CTR
+            # use_pcgrad_strict controls which PCGrad variant to use:
+            # - strict (default False): true gradient projection via backward hook
+            # - approximate: loss-weighting modulation (compatible with large batches)
+            is_strict = getattr(self.model, "_use_pcgrad_strict", False)
+            if is_strict:
+                self.pcgrad = PCGradLoss(
+                    asymmetric=True
+                )  # CVR-priority strict gradient projection
+            else:
+                self.pcgrad = PCGradLossApprox(
+                    asymmetric=True
+                )  # Approximate loss-weighting modulation
 
         self._uw_first_call = True
 

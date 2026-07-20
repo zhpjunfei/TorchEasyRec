@@ -50,6 +50,7 @@ class MultiTaskRank(RankModel):
         self._use_uncertainty_weight = model_config.use_uncertainty_weight
 
         self._use_pcgrad = model_config.use_pcgrad
+        self._use_pcgrad_strict = getattr(model_config, "use_pcgrad_strict", False)
 
         self._use_ctcvr_loss = model_config.use_ctcvr_loss
         self._ctcvr_loss_weight = model_config.ctcvr_loss_weight
