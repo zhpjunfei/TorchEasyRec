@@ -12,18 +12,20 @@
 
 Based on "Gradient Surgery for Multi-Task Learning" (Yu et al., NeurIPS 2020).
 
-Memory-efficient: computes per-task gradients from the shared forward graph
-using a single autograd.grad() call with detached task losses, then uses
-a backward hook to patch gradients in-place (avoiding large intermediate
-computation graph that would OOM on large models).
+Memory-efficient implementation: extracts per-task gradients via autograd.grad()
+on each task's individual loss, then uses a backward hook to patch gradients
+in-place (avoiding the large flat_params tensor that would OOM on large models).
 
 Key design decisions:
-1. Per-task gradient extraction: detach other tasks' losses, call
-   autograd.grad() on the remaining task. retain_graph=True only for
-   penultimate task, freeing the graph on the last task.
-2. Gradient patching via backward hook: create a leaf trigger tensor,
-   register hook that writes projected gradients directly to p.grad.
-   backward() on trigger is O(1) memory.
+1. Per-task gradient extraction: call autograd.grad() on each task's individual
+   loss separately (NOT a combined loss). This avoids introducing extra nodes
+   into the forward graph that would increase memory consumption.
+2. retain_graph=True for ALL tasks: keeps the forward graph alive between
+   gradient extractions. This strategy (matching f1e41ba / 7.19) avoids potential
+   CUDA memory allocator fragmentation issues that can occur with retain_graph=False.
+3. Gradient patching via backward hook: create a leaf trigger tensor, register
+   a hook that writes projected gradients directly to p.grad. backward() on
+   trigger is O(1) memory, avoiding the large flat_params tensor.
 """
 
 from typing import TYPE_CHECKING, Dict, List, Tuple
@@ -94,20 +96,26 @@ class PCGradLoss(nn.Module):
         losses: Dict[str, torch.Tensor],
         model: nn.Module,
     ) -> Tuple[torch.Tensor, List[nn.Parameter]]:
-        """Extract per-task gradients from the shared forward graph.
+        """Extract per-task gradients via autograd.grad() on shared graph.
 
-        For each task i, detaches all other tasks' losses and calls
-        autograd.grad() on the remaining task loss. Uses retain_graph=True
-        only for the penultimate task, so the forward graph is freed after
-        the last task's gradient is extracted.
+        For each task i, calls autograd.grad(loss_i, params) directly on the
+        individual task's loss. Uses retain_graph=True for all tasks to keep
+        the forward graph alive between gradient extractions.
 
-        Peak memory: O(forward_graph) — the graph is held for (N-1) tasks
-        then freed on the last task. For N=2, this means the graph is held
-        only during task 0's gradient computation, then freed during task 1.
+        autograd.grad() does NOT consume the computation graph (unlike
+        backward()), so multiple calls on the same graph are safe.
+
+        Peak memory: O(forward_graph) — the graph is held for all N tasks
+        via retain_graph=True, matching the proven working strategy from f1e41ba.
+
+        IMPORTANT: Each task's loss is passed to autograd.grad() individually.
+        DO NOT combine multiple task losses into a single tensor before calling
+        autograd.grad(), as this introduces extra add nodes into the forward graph
+        that can cause OOM on memory-constrained GPUs.
 
         Args:
             losses: dict mapping task name -> loss tensor.
-            model: the PyTorch model.
+            model: the model.
 
         Returns:
             grads: stacked tensor of shape (n_tasks, n_params).
@@ -122,28 +130,18 @@ class PCGradLoss(nn.Module):
         grads = torch.zeros(
             n_tasks, n_params, device=params[0].device, dtype=params[0].dtype
         )
-        loss_items = list(losses.items())
 
-        for i in range(n_tasks):
-            # Build combined loss with only task i active (others detached)
-            parts = []
-            for j, (_name, loss_val) in enumerate(loss_items):
-                if j == i:
-                    val = torch.sum(loss_val, dim=0) if loss_val.dim() > 0 else loss_val
-                else:
-                    val = (
-                        torch.sum(loss_val.detach(), dim=0)
-                        if loss_val.dim() > 0
-                        else loss_val.detach()
-                    )
-                parts.append(val)
-
-            combined = sum(parts)
+        for i, (_name, loss_val) in enumerate(losses.items()):
+            # Ensure we get a scalar for autograd — sum over all dimensions
+            if loss_val.dim() == 0:
+                grad_scalar = loss_val
+            else:
+                grad_scalar = torch.sum(loss_val)
 
             raw_grads = torch.autograd.grad(
-                combined,
+                grad_scalar,
                 params,
-                retain_graph=(i < n_tasks - 1),
+                retain_graph=True,
                 allow_unused=True,
                 create_graph=False,
             )
