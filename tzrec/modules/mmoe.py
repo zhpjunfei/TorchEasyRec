@@ -33,6 +33,8 @@ class MMoE(nn.Module):
         num_expert: int,
         num_task: int,
         gate_mlp: Optional[Dict[str, Any]] = None,
+        expert_norm: bool = False,
+        expert_norm_type: str = "layer",
     ) -> None:
         super().__init__()
         self.num_expert = num_expert
@@ -41,6 +43,24 @@ class MMoE(nn.Module):
         self.expert_mlps = nn.ModuleList(
             [MLP(in_features=in_features, **expert_mlp) for _ in range(num_expert)]
         )
+
+        # Expert normalization (HoME Phase 1)
+        self._expert_norm = expert_norm
+        self._expert_norm_type = expert_norm_type
+        if self._expert_norm:
+            expert_dim = expert_mlp["hidden_units"][-1]
+            norm_cls = nn.LayerNorm if expert_norm_type == "layer" else nn.GroupNorm
+            self._expert_norms = nn.ModuleList(
+                [
+                    norm_cls(expert_dim)
+                    if expert_norm_type == "layer"
+                    else norm_cls(num_groups=2, num_channels=expert_dim)
+                    for _ in range(num_expert)
+                ]
+            )
+        else:
+            self._expert_norms = None
+
         gate_final_in = in_features
         self.has_gate_mlp = False
         if gate_mlp is not None:
@@ -61,7 +81,10 @@ class MMoE(nn.Module):
         """Forward the module."""
         expert_fea_list = []
         for i in range(self.num_expert):
-            expert_fea_list.append(self.expert_mlps[i](input))
+            expert_out = self.expert_mlps[i](input)
+            if self._expert_norms is not None:
+                expert_out = self._expert_norms[i](expert_out)
+            expert_fea_list.append(expert_out)
         expert_feas = torch.stack(expert_fea_list, dim=1)
 
         result = []

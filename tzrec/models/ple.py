@@ -66,10 +66,14 @@ class PLE(MultiTaskRank):
             else:
                 final_flag = False
             extraction_network_cfg = config_to_kwargs(extraction_network_cfg)
+            expert_norm = getattr(self._model_config, "expert_normalization", False)
+            expert_norm_type = getattr(self._model_config, "expert_norm_type", "layer")
             extraction = ExtractionNet(
                 in_extraction_networks,
                 in_shared_expert,
                 final_flag=final_flag,
+                expert_norm=expert_norm,
+                expert_norm_type=expert_norm_type,
                 **extraction_network_cfg,
             )
             self._extraction_nets.append(extraction)

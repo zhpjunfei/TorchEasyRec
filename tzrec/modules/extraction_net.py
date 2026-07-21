@@ -41,6 +41,8 @@ class ExtractionNet(nn.Module):
         share_expert_net: Dict[str, Any],
         task_expert_net: Dict[str, Any],
         final_flag: bool = False,
+        expert_norm: bool = False,
+        expert_norm_type: str = "layer",
     ) -> None:
         super().__init__()
         self.name = network_name
@@ -82,16 +84,51 @@ class ExtractionNet(nn.Module):
             self._output_dims.append(task_output_dim)
         self._output_dims.append(share_output_dim)
 
+        # Expert normalization (HoME Phase 1)
+        self._expert_norm = expert_norm
+        self._expert_norm_type = expert_norm_type
+        self._task_norms = None
+        self._shared_norms = None
+        if self._expert_norm:
+            task_dim = task_expert_net["hidden_units"][-1]
+            shared_dim = share_expert_net["hidden_units"][-1]
+            norm_cls = nn.LayerNorm if expert_norm_type == "layer" else nn.GroupNorm
+            self._task_norms = nn.ModuleList()
+            for _ in in_extraction_networks:
+                self._task_norms.append(
+                    nn.ModuleList(
+                        [
+                            norm_cls(task_dim)
+                            if expert_norm_type == "layer"
+                            else norm_cls(num_groups=2, num_channels=task_dim)
+                            for _ in range(expert_num_per_task)
+                        ]
+                    )
+                )
+            self._shared_norms = nn.ModuleList(
+                [
+                    norm_cls(shared_dim)
+                    if expert_norm_type == "layer"
+                    else norm_cls(num_groups=2, num_channels=shared_dim)
+                    for _ in range(share_num)
+                ]
+            )
+
     def output_dim(self) -> List[int]:
         """Output Task expert and shared expert dimension of the module."""
         return self._output_dims
 
     def _experts_layer_forward(
-        self, deep_fea: torch.Tensor, layers: nn.ModuleList
+        self,
+        deep_fea: torch.Tensor,
+        layers: nn.ModuleList,
+        norms: Optional[nn.ModuleList] = None,
     ) -> List[torch.Tensor]:
         tower_outputs = []
-        for layer in layers:
+        for idx, layer in enumerate(layers):
             output = layer(deep_fea)
+            if norms is not None:
+                output = norms[idx](output)
             tower_outputs.append(output)
         return tower_outputs
 
@@ -115,13 +152,14 @@ class ExtractionNet(nn.Module):
     ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor]]:
         """Forward the module."""
         shared_expert = self._experts_layer_forward(
-            shared_expert_fea, self._shared_layers
+            shared_expert_fea, self._shared_layers, self._shared_norms
         )
         all_task_experts = []
         cgc_layer_outs = []
         for i, task_layers in enumerate(self._task_layers):
+            task_norms = self._task_norms[i] if self._task_norms else None
             task_experts = self._experts_layer_forward(
-                extraction_network_fea[i], cast(nn.ModuleList, task_layers)
+                extraction_network_fea[i], cast(nn.ModuleList, task_layers), task_norms
             )
             cgc_task_out = self._gate_forward(
                 extraction_network_fea[i],

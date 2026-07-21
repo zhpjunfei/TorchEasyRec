@@ -17,6 +17,8 @@ message MMoE {
     required uint32 num_expert = 3 [default=3];
     // task tower
     repeated TaskTower task_towers = 4;
+    optional bool expert_normalization = 5 [default = false];
+    optional string expert_norm_type = 6 [default = "layer"];
 }
 
 message DBMTL {
@@ -30,6 +32,8 @@ message DBMTL {
     optional MLP gate_mlp = 3;
     // number of mmoe experts
     optional uint32 num_expert = 4 [default=3];
+    optional bool expert_normalization = 7 [default = false];
+    optional string expert_norm_type = 8 [default = "layer"];
     // bayes task tower
     repeated BayesTaskTower task_towers = 5;
 }
@@ -45,6 +49,8 @@ message DC2VR {
     optional uint32 num_expert = 4 [default=3];
     // task tower
     repeated InterventionTaskTower task_towers = 5;
+    optional bool expert_normalization = 7 [default = false];
+    optional string expert_norm_type = 8 [default = "layer"];
 }
 
 
@@ -54,6 +60,8 @@ message PLE {
     repeated ExtractionNetwork extraction_networks = 1;
     // task tower
     repeated TaskTower task_towers = 2;
+    optional bool expert_normalization = 3 [default = false];
+    optional string expert_norm_type = 4 [default = "layer"];
 }
 
 
@@ -247,4 +255,7 @@ message PEPNetDCNPLE {
     optional float initial_temperature = 27 [default = 1.0];
     // Whether to freeze temperature after initialization.
     optional bool freeze_temperature = 28 [default = false];
+    // HoME Phase 1: expert normalization config
+    optional bool expert_normalization = 32 [default = false];
+    optional string expert_norm_type = 33 [default = "layer"];
 }

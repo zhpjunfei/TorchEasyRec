@@ -65,6 +65,10 @@ class DC2VR(MultiTaskRank):
                 gate_mlp=config_to_kwargs(self._model_config.gate_mlp)
                 if self._model_config.HasField("gate_mlp")
                 else None,
+                expert_norm=getattr(self._model_config, "expert_normalization", False),
+                expert_norm_type=getattr(
+                    self._model_config, "expert_norm_type", "layer"
+                ),
             )
             feature_in = self.mmoe.output_dim()
 

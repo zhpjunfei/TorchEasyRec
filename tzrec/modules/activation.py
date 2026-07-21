@@ -100,6 +100,8 @@ def create_activation(act_str: str = "nn.ReLU", **kwargs: Any) -> Optional[nn.Mo
         dim = kwargs["dim"]
         use_layer_norm = kwargs.get("use_layer_norm", False)
         act_module = Dice(hidden_size, dim, use_layer_norm)
+    elif act_str == "Swish":
+        act_module = nn.SiLU()
     elif len(act_str) > 0:
         act_strs = act_str.strip(")").split("(", 1)
 
