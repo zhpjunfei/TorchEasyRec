@@ -17,6 +17,7 @@ from torch import nn
 from tzrec.datasets.utils import Batch
 from tzrec.features.feature import BaseFeature
 from tzrec.models.multi_task_rank import MultiTaskRank
+from tzrec.modules.expert_similarity import ExpertSimMonitor
 from tzrec.modules.mmoe import MMoE as MMoEModule
 from tzrec.modules.task_tower import TaskTower
 from tzrec.protos.model_pb2 import ModelConfig
@@ -46,6 +47,11 @@ class MMoE(MultiTaskRank):
         self.init_input()
         self.group_name = self.embedding_group.group_names()[0]
         mmoe_feature_in = self.embedding_group.group_total_dim(self.group_name)
+
+        # Read expert similarity config from proto
+        expert_sim_enabled = getattr(self._model_config, "expert_sim_enabled", False)
+        expert_sim_log_step = getattr(self._model_config, "expert_sim_log_step", 100)
+
         self.mmoe = MMoEModule(
             in_features=mmoe_feature_in,
             expert_mlp=config_to_kwargs(self._model_config.expert_mlp),
@@ -56,6 +62,14 @@ class MMoE(MultiTaskRank):
             else None,
             expert_norm=getattr(self._model_config, "expert_normalization", False),
             expert_norm_type=getattr(self._model_config, "expert_norm_type", "layer"),
+            expert_sim_callback=None,  # Set externally via main.py when enabled
+        )
+
+        # Expert similarity monitor (disabled by default, enabled via config)
+        self._expert_sim_monitor = ExpertSimMonitor(
+            prefix="expert_sim/mmoe",
+            on_step=expert_sim_log_step,
+            enabled=bool(expert_sim_enabled),
         )
 
         tower_feature_in = self.mmoe.output_dim()
@@ -77,7 +91,15 @@ class MMoE(MultiTaskRank):
             predictions (dict): a dict of predicted result.
         """
         grouped_features = self.build_input(batch)
-        task_input_list = self.mmoe(grouped_features[self.group_name])
+        expert_sim_step = (
+            getattr(self, "_current_step", None)
+            if self._expert_sim_monitor.enabled
+            else None
+        )
+        task_input_list = self.mmoe(
+            grouped_features[self.group_name],
+            expert_sim_step=expert_sim_step,
+        )
 
         tower_outputs = {}
         for i, task_tower_cfg in enumerate(self._task_tower_cfgs):

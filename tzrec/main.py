@@ -386,6 +386,12 @@ def _train_and_evaluate(
             tb_summaries = list(tb_summaries_set)
 
     eval_result_filename = os.path.join(model_dir, eval_result_filename)
+    # --- Expert similarity monitoring ---
+    if is_rank_zero and summary_writer is not None:
+        if hasattr(model, "mmoe") and hasattr(model, "_expert_sim_monitor"):
+            model.mmoe.expert_sim_callback = model._expert_sim_monitor.callback
+            model._expert_sim_monitor.summary_writer = summary_writer
+            model._expert_sim_monitor.enabled = True
 
     if train_config.is_profiling:
         if is_rank_zero:

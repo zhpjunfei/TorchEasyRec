@@ -9,10 +9,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 from torch import nn
+from torch.fx._symbolic_trace import is_fx_tracing
 from torch.nn import functional as F
 
 from tzrec.modules.mlp import MLP
@@ -35,10 +36,12 @@ class MMoE(nn.Module):
         gate_mlp: Optional[Dict[str, Any]] = None,
         expert_norm: bool = False,
         expert_norm_type: str = "layer",
+        expert_sim_callback: Optional[Callable[[torch.Tensor, int], None]] = None,
     ) -> None:
         super().__init__()
         self.num_expert = num_expert
         self.num_task = num_task
+        self.expert_sim_callback = expert_sim_callback
 
         self.expert_mlps = nn.ModuleList(
             [MLP(in_features=in_features, **expert_mlp) for _ in range(num_expert)]
@@ -77,15 +80,38 @@ class MMoE(nn.Module):
         """Output dimension of the module."""
         return self.expert_mlps[0].hidden_units[-1]
 
-    def forward(self, input: torch.Tensor) -> List[torch.Tensor]:
-        """Forward the module."""
+    def forward(
+        self,
+        input: torch.Tensor,
+        expert_sim_step: Optional[int] = None,
+    ) -> List[torch.Tensor]:
+        """Forward the module.
+
+        Args:
+            input: Input tensor [batch, features].
+            expert_sim_step: Current training step. Used when expert_sim_callback
+                             is set to determine logging frequency.
+
+        Returns:
+            List of task-specific outputs [[batch, output_dim]] * num_task
+        """
         expert_fea_list = []
         for i in range(self.num_expert):
             expert_out = self.expert_mlps[i](input)
             if self._expert_norms is not None:
                 expert_out = self._expert_norms[i](expert_out)
             expert_fea_list.append(expert_out)
-        expert_feas = torch.stack(expert_fea_list, dim=1)
+        expert_feas = torch.stack(
+            expert_fea_list, dim=1
+        )  # [num_expert, batch, features]
+
+        # Compute expert similarity monitoring (outside FX tracing path)
+        if (
+            self.expert_sim_callback is not None
+            and expert_sim_step is not None
+            and not is_fx_tracing()
+        ):
+            self.expert_sim_callback(expert_feas, expert_sim_step)
 
         result = []
         for i in range(self.num_task):

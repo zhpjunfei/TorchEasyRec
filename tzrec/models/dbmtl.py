@@ -17,6 +17,7 @@ from torch import nn
 from tzrec.datasets.utils import Batch
 from tzrec.features.feature import BaseFeature
 from tzrec.models.multi_task_rank import MultiTaskRank
+from tzrec.modules.expert_similarity import ExpertSimMonitor
 from tzrec.modules.masknet import MaskNetModule
 from tzrec.modules.mlp import MLP
 from tzrec.modules.mmoe import MMoE as MMoEModule
@@ -68,6 +69,10 @@ class DBMTL(MultiTaskRank):
             )
             feature_in = self.bottom_mlp.output_dim()
 
+        # Read expert similarity config from proto
+        expert_sim_enabled = getattr(self._model_config, "expert_sim_enabled", False)
+        expert_sim_log_step = getattr(self._model_config, "expert_sim_log_step", 100)
+
         self.mmoe = None
         if self._model_config.HasField("expert_mlp"):
             self.mmoe = MMoEModule(
@@ -82,8 +87,16 @@ class DBMTL(MultiTaskRank):
                 expert_norm_type=getattr(
                     self._model_config, "expert_norm_type", "layer"
                 ),
+                expert_sim_callback=None,  # Set externally via main.py
             )
             feature_in = self.mmoe.output_dim()
+
+            # Expert similarity monitor (disabled by default, enabled via proto config)
+            self._expert_sim_monitor = ExpertSimMonitor(
+                prefix="expert_sim/dbmtl",
+                on_step=expert_sim_log_step,
+                enabled=bool(expert_sim_enabled),
+            )
 
         self.task_mlps = nn.ModuleDict()
         for task_tower_cfg in self._task_tower_cfgs:
@@ -143,8 +156,14 @@ class DBMTL(MultiTaskRank):
         if self.bottom_mlp is not None:
             net = self.bottom_mlp(net)
 
+        # Pass expert_sim_step only when monitoring is enabled
+        expert_sim_step = (
+            getattr(self, "_current_step", None)
+            if hasattr(self, "_expert_sim_monitor") and self._expert_sim_monitor.enabled
+            else None
+        )
         if self.mmoe is not None:
-            task_input_list = self.mmoe(net)
+            task_input_list = self.mmoe(net, expert_sim_step=expert_sim_step)
         else:
             task_input_list = [net] * len(self._task_tower_cfgs)
 
