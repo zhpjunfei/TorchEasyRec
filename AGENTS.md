@@ -181,3 +181,7 @@ cvr_keys = [k for k in losses if "cvr" in k or "ctcvr" in k]
 - DDP 下 `.reshape(-1)` 而非 `.view(-1)`（tensor 可能不连续）。
 - backward hook 中 `_patch_gradients` 必须直接赋值 `p.grad`，
   不能检查 `p.grad is None` 后 continue（首次调用时全是 None）。
+
+## 工具调用反模式（2026-07-24）
+
+**BUG: 重复执行相同命令导致无限循环 — 每次工具调用后先判断信息是否已足够，足够就停止并分析结论，不足够再换方向获取新信息。**
