@@ -195,3 +195,198 @@ def create_temperature_scalers(
             for _ in range(num_tasks)
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# Platt Scaling — Inference-time calibration
+# ---------------------------------------------------------------------------
+
+
+class PlattScaler(nn.Module):
+    """单任务塔的可学习 Platt 校准 (a*logit + b)。
+
+    应用 :math:`\\sigma(a \\cdot \\text{logit} + b)`，其中 :math:`a, b` 为可学习参数。
+
+    与 TemperatureScaler 不同，PlattScaler 有两个自由度：
+    - ``a`` 控制缩放（类似 temperature），但可以有符号翻转
+    - ``b`` 控制偏移（temperature scaling 无法做偏移）
+
+    用法：
+        1. 创建 scaler = PlattScaler()  (a=1, b=0 初始化)
+        2. 在 validation set 上 fit(fitted_logits, fitted_labels)
+        3. 冻结: scaler.freeze()
+        4. inference 时通过 forward() 应用校准
+
+    Args:
+        freeze: 如果为 True，a=1, b=0（即不校准）。
+    """
+
+    def __init__(self, freeze: bool = False) -> None:
+        super().__init__()
+        self._frozen = freeze
+
+        if freeze:
+            # 冻结模式：不参与梯度，等同于 identity
+            self.register_buffer("_a", torch.tensor(1.0))
+            self.register_buffer("_b", torch.tensor(0.0))
+        else:
+            self.a = nn.Parameter(torch.tensor(1.0))
+            self.b = nn.Parameter(torch.tensor(0.0))
+
+    def forward(self, logits: torch.Tensor) -> torch.Tensor:
+        """对 logits 做 Platt 校准。"""
+        if hasattr(self, "a"):
+            return torch.sigmoid(self.a * logits + self.b)
+        else:
+            # frozen: apply sigmoid(a*logit + b) with frozen buffers
+            return torch.sigmoid(self._a * logits + self._b)
+
+    def get_a(self) -> float:
+        if hasattr(self, "a"):
+            return self.a.item()
+        return self._a.item()
+
+    def get_b(self) -> float:
+        if hasattr(self, "b"):
+            return self.b.item()
+        return self._b.item()
+
+    def fit_from_problabels(
+        self,
+        probs: torch.Tensor,
+        labels: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        max_iter: int = 100,
+    ) -> dict:
+        """从已有 probs + labels 拟合 a, b。
+
+        注意：输入是 sigmoid(logits) 后的概率值，所以我们先在 logit-space
+        反求原始 logits，然后在新 logits 上用牛顿法拟合 a,b。
+
+        这允许我们在训练结束后，用 validation set 的 preds 做离线校准，
+        无需重新跑 forward。
+
+        Returns:
+            包含 fitting 统计信息的字典。
+        """
+        assert not self._frozen, "Cannot fit a frozen PlattScaler"
+
+        # Clip probs to avoid log(0)
+        eps = 1e-7
+        probs_clipped = probs.clamp(min=eps, max=1 - eps)
+
+        # Invert sigmoid to get back logits
+        logits = torch.log(probs_clipped / (1 - probs_clipped))
+
+        return self.fit_from_logits(logits, labels, weights, max_iter)
+
+    def fit_from_logits(
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        max_iter: int = 100,
+    ) -> dict:
+        """使用牛顿法拟合 Platt 参数 (a, b)。
+
+        最小化负 log-likelihood:
+            L = -sum_i [ y_i * log(sigmoid(a*x_i+b)) + (1-y_i)*log(1-sigmoid(a*x_i+b)) ]
+
+        Args:
+            logits: 原始 logits，形状 (N,)
+            labels: 二值标签，形状 (N,)
+            weights: 可选样本权重，形状 (N,)
+            max_iter: 牛顿法最大迭代次数
+
+        Returns:
+            包含 fitting 收敛信息的字典。
+        """
+        N = logits.size(0)
+        x = logits.float()
+        y = labels.float()
+
+        if weights is None:
+            w = torch.ones(N, dtype=torch.float32, device=logits.device)
+        else:
+            w = weights.float()
+
+        # 初始化 a=1, b=0
+        a = torch.tensor(1.0, device=logits.device)
+        b = torch.tensor(0.0, device=logits.device)
+
+        prev_loss = None
+        converged = False
+
+        for iteration in range(max_iter):
+            # z = a*x + b
+            z = a * x + b
+            p = torch.sigmoid(z)
+
+            # Negative log likelihood
+            pw = p * w
+            yw = y * w
+            loss = (
+                -(
+                    yw * torch.log(p.clamp(min=1e-7))
+                    + (1 - yw) * torch.log((1 - p).clamp(min=1e-7))
+                ).sum()
+                / w.sum()
+            )
+
+            if prev_loss is not None and abs(prev_loss - loss) < 1e-6:
+                converged = True
+                prev_loss = loss
+                break
+            prev_loss = loss
+
+            # Gradient of loss w.r.t. a, b
+            # dL/da = -sum w*y*x*p(1-p)*(y-p) / sum(w)
+            # dL/db = -sum w*y*p(1-p)*(y-p) / sum(w)
+            residual = p - y  # (N,)
+            grad_a = (w * residual * x).sum() / w.sum()
+            grad_b = (w * residual).sum() / w.sum()
+
+            # Hessian (approximate)
+            hessian_a = (w * p * (1 - p) * x * x).sum() / w.sum() + 1e-6
+            hessian_ab = (w * p * (1 - p) * x).sum() / w.sum()
+            hessian_b = (w * p * (1 - p)).sum() / w.sum() + 1e-6
+
+            # Newton step with damping
+            det = hessian_a * hessian_b - hessian_ab * hessian_ab
+            if abs(det) < 1e-10:
+                # Fall back to gradient descent
+                a -= 0.01 * grad_a
+                b -= 0.01 * grad_b
+            else:
+                da = (hessian_b * grad_a - hessian_ab * grad_b) / det
+                db = (hessian_a * grad_b - hessian_ab * grad_a) / det
+                # Line search with damping
+                a -= 0.5 * da
+                b -= 0.5 * db
+
+        # Save fitted parameters back to module parameters
+        if hasattr(self, "a"):
+            self.a.data = a.clone().detach()
+            self.b.data = b.clone().detach()
+
+        return {
+            "a": a.item(),
+            "b": b.item(),
+            "final_loss": loss.item(),
+            "converged": converged,
+            "iterations": iteration + 1,
+        }
+
+    def freeze(self) -> None:
+        """将当前拟合的 a,b 冻结为常量。"""
+        if hasattr(self, "a"):
+            a_val = self.a.data.clone()
+            b_val = self.b.data.clone()
+            del self.a
+            del self.b
+            self.register_buffer("_a", a_val)
+            self.register_buffer("_b", b_val)
+            self._frozen = True
+
+    def is_frozen(self) -> bool:
+        return self._frozen

@@ -169,11 +169,16 @@ def export_model_normal(
     # make dataparser to get user feats before create model
     data_config = copy.deepcopy(pipeline_config.data_config)
     features = cast(List[BaseFeature], model.features)
-    if acc_utils.is_cuda_export():
-        # export batch_size too large may OOM in compile phase
-        max_batch_size = acc_utils.get_max_export_batch_size()
-        data_config.batch_size = min(data_config.batch_size, max_batch_size)
-        logger.info("using new batch_size: %s in export", data_config.batch_size)
+    # export batch_size too large may OOM in JIT script or compile phase;
+    # apply to ALL export paths (JIT script, TRT, AOT).
+    max_batch_size = acc_utils.get_max_export_batch_size()
+    if data_config.batch_size > max_batch_size:
+        logger.info(
+            "export: reducing batch_size %d -> %d (MAX_EXPORT_BATCH_SIZE)",
+            data_config.batch_size,
+            max_batch_size,
+        )
+        data_config.batch_size = max_batch_size
     data_config.num_workers = 1
     input_path = data_input_path or pipeline_config.train_input_path
     dataloader = create_dataloader(data_config, features, input_path, mode=Mode.PREDICT)

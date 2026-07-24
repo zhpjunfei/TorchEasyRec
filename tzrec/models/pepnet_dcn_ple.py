@@ -23,6 +23,7 @@ from tzrec.features.feature import BaseFeature
 from tzrec.models.multi_task_rank import MultiTaskRank
 from tzrec.modules.afp.afp_net import AFPModule
 from tzrec.modules.calibration import (
+    PlattScaler,
     compute_soft_ece,
     create_temperature_scalers,
 )
@@ -591,6 +592,31 @@ class PEPNetDCNPLE(MultiTaskRank):
         else:
             self._temperature_scalers = None
             self._tower_to_scaler_idx = {}
+        # --- Inference-time Platt Scaling (platt_calib_enabled) ---
+        # Separate from temperature calibration. Applied AFTER temperature scaling
+        # but only during inference (training uses ECE loss via TemperatureScaler).
+        # Fitted offline via platt_calibrate.py and saved in checkpoint buffers.
+        self._platt_calib_enabled = getattr(
+            self._base_model_config, "platt_calibration_enabled", False
+        )
+        if self._platt_calib_enabled:
+            num_tasks = len(self._task_tower_cfgs)
+            self._platt_scalers = nn.ModuleList(
+                [PlattScaler(freeze=True) for _ in range(num_tasks)]
+            )
+            # Map tower_name -> scaler index (same mapping as temperature scalers)
+            self._platt_tower_to_scaler_idx = {
+                cfg.tower_name: idx for idx, cfg in enumerate(self._task_tower_cfgs)
+            }
+            if self._calibrated_tower_names:
+                self._platt_tower_to_scaler_idx = {
+                    name: idx
+                    for name, idx in self._platt_tower_to_scaler_idx.items()
+                    if name in self._calibrated_tower_names
+                }
+        else:
+            self._platt_scalers = None
+            self._platt_tower_to_scaler_idx = {}
         self._calibration_metrics = {}
         self._current_step = 0
 
@@ -856,6 +882,20 @@ class PEPNetDCNPLE(MultiTaskRank):
                         self._tower_to_scaler_idx[tower_name]
                     ]
                     tower_outputs[tower_name] = scaler(tower_output)
+
+        # --- Inference-time Platt Scaling (post temperature calibration) ---
+        # Applied during inference only. During training, ECE loss via
+        # TemperatureScaler handles calibration in the loss function.
+        # Platt scaling uses two parameters (a, b) for sigma(a*logit + b),
+        # offering more flexibility than temperature-only scaling.
+        if self._platt_calib_enabled and not is_fx_tracing():
+            for tower_name, tower_output in tower_outputs.items():
+                if tower_name in self._platt_tower_to_scaler_idx:
+                    idx = self._platt_tower_to_scaler_idx[tower_name]
+                    platt = self._platt_scalers[idx]
+                    # Only apply if this PlattScaler has been fitted (buffers exist)
+                    if hasattr(platt, "_a") and hasattr(platt, "_b"):
+                        tower_outputs[tower_name] = platt(tower_output)
 
         predictions = self._multi_task_output_to_prediction(tower_outputs)
 

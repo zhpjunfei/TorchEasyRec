@@ -131,6 +131,10 @@ message ModelConfig {
     // Example: "cvr" to calibrate only CVR tower.
     optional string calibration_tower_names = 23 [default = ""];
 
+    // Inference-time Platt scaling (a*logit + b). Fitted offline after
+    // training; applied as post-processing during inference.
+    optional bool platt_calibration_enabled = 25 [default = false];
+
     // whether use strict PCGrad (true gradient projection) vs approximate
     // (loss-weighting modulation). Strict mode requires more GPU memory.
     optional bool use_pcgrad_strict = 24 [default = false];
