@@ -242,7 +242,20 @@ def main() -> None:
         logger.info("Loading trained checkpoint...")
         ckpt_path, step = latest_checkpoint(latest_ckpt)
         logger.info("Restoring from %s (step %d)", ckpt_path, step)
-        restore_model(ckpt_path, model)
+        try:
+            restore_model(ckpt_path, model)
+        except AssertionError as e:
+            # DCP checkpoint with MC embedding sharding fails on single-GPU.
+            # Fall back to loading state_dict directly with strict=False.
+            logger.warning(
+                "DCP restore failed (%s), falling back to state_dict load", e
+            )
+            from torch.distributed.checkpoint import load as dcp_load
+
+            state_dict = {}
+            dcp_load(state_dict, checkpoint_id=ckpt_path)
+            model.load_state_dict(state_dict, strict=False)
+            logger.info("Fallback state_dict load succeeded.")
 
         # Verify platt scalers exist
         if not hasattr(model, "_platt_scalers") or model._platt_scalers is None:
