@@ -237,7 +237,8 @@ def main() -> None:
             model_config, features, list(pipeline_config.data_config.label_fields)
         )
         device = torch.device(args.device)
-        model = model.to(device)
+        # Use to_empty() because embedding tensors may be on meta device
+        model = model.to_empty(device=device)
         logger.info("Loading trained checkpoint...")
         ckpt_path, step = latest_checkpoint(latest_ckpt)
         logger.info("Restoring from %s (step %d)", ckpt_path, step)
