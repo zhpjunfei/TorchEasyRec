@@ -888,7 +888,7 @@ class PEPNetDCNPLE(MultiTaskRank):
         # TemperatureScaler handles calibration in the loss function.
         # Platt scaling uses two parameters (a, b) for sigma(a*logit + b),
         # offering more flexibility than temperature-only scaling.
-        if self._platt_calib_enabled and not is_fx_tracing():
+        if self._platt_calib_enabled and not is_fx_tracing() and not self.training:
             for tower_name, tower_output in tower_outputs.items():
                 if tower_name in self._platt_tower_to_scaler_idx:
                     idx = self._platt_tower_to_scaler_idx[tower_name]

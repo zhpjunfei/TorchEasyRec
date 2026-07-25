@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html><head><style>
+body { font-family: 'SF Mono', 'Fira Code', monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+.box { border-radius: 8px; padding: 12px 16px; margin: 4px 0; position: relative; }
+.arrow { text-align: center; color: #666; font-size: 18px; }
+.title { text-align: center; font-size: 20px; font-weight: bold; color: #fff; margin-bottom: 20px; }
+.subtitle { text-align: center; color: #888; font-size: 12px; margin-bottom: 30px; }
+.input-box { background: #16213e; border: 2px solid #0f3460; }
+.epnet-box { background: #0d2b3e; border: 2px solid #00838f; }
+.afp-box { background: #2d2a0e; border: 2px solid #f9a825; }
+.ple-box { background: #2a0e2d; border: 2px solid #6a1b9a; }
+.tower-box { background: #0e2d16; border: 2px solid #2e7d32; }
+.logit-box { background: #16213e; border: 2px solid #1976d2; }
+.example-box { background: #2d1616; border: 2px solid #c62828; }
+.note { color: #888; font-size: 11px; font-style: italic; }
+.label { color: #aaa; font-size: 12px; }
+.key { color: #4fc3f7; font-weight: bold; }
+.green { color: #66bb6a; }
+.yellow { color: #ffd54f; }
+.red { color: #ef5350; }
+</style></head><body>
+
+<div class="title">AFP feature_wise — Complete Data Flow</div>
+<div class="subtitle">home_flow_2604_v15_afp.config | B=4096 | 17 features → 136D | UV_CTR +1.94% | UV_CVR +3.39%</div>
+
+<!-- Row 1: Input -->
+<div class="box input-box" style="text-align:center;">
+<span class="key">INPUT BATCH [B=4096]</span><br>
+<span class="label">domain group: 17 features concatenated → <span class="green">lhuc_features [B,136]</span></span><br>
+<span class="label">all group: main + DCNv2 + CDOT + bias + tag_seq → <span class="yellow">deep_input [B,D_deep]</span></span>
+</div>
+
+<div class="arrow">↓                    ↓</div>
+
+<!-- Row 2: EPNet and AFP parallel -->
+<table style="width:100%;border-collapse:collapse;">
+<tr>
+<td style="width:50%;vertical-align:top;">
+<div class="box epnet-box">
+<span class="key">EPNet (LHUC Scale Generation)</span><br><br>
+<span class="label">INPUT: complete lhuc_features [B,136]</span><br>
+<span class="label">gate_mlp: Linear(136→256→D_deep) → tanh → scale</span><br>
+<span class="label">scale = tanh(x×0.2) × (5+layer_idx) + 1</span><br>
+<span class="label">deep_input_scaled = deep_input × ep_scale</span><br><br>
+<span class="note">EPNet sees ALL features for meaningful scaling</span>
+</div>
+</td>
+<td style="width:50%;vertical-align:top;">
+<div class="box afp-box">
+<span class="key">AFP — Feature Partitioning</span><br><br>
+<span class="label">17 classifiers: Linear(dim_i → 64 → 32 → 1)</span><br>
+<span class="label">classifier_i(feat_i) → logit_i → p_i ∈ [0,1]</span><br>
+<span class="label">partition_probs: [B, 17] — per-sample routing</span><br>
+<span class="label">gate_input = feat × (1-p)  |  dnn_input = feat × p</span><br><br>
+<span class="note">T=1.0→0.1 annealing + entropy_reg_weight=0.05→0.01</span>
+</div>
+</td>
+</tr>
+</table>
+
+<div class="arrow">scaled deep_input ↓        gate_input [B,136] ↓</div>
+
+<!-- Row 3: PLE -->
+<div class="box ple-box">
+<span class="key">PLE ExtractionNet (Shared + Task Experts)</span><br><br>
+<span class="label">Layer 1: shared_expert + ctr_expert + cvr_expert → Gate softmax → weighted sum</span><br>
+<span class="label">Layer 2: 256→128, same structure</span><br>
+<span class="label">Output: ctr_fea [B,128] | cvr_fea [B,128]</span>
+</div>
+
+<div class="arrow">ctr_fea ↓     cvr_fea ↓      gate_input (from AFP, dashed) ↓</div>
+
+<!-- Row 4: PPNet Towers -->
+<div class="box tower-box">
+<span class="key">LHUC_PPNet Towers</span><br><br>
+<span class="label"><span class="green">CTR Tower:</span> fe[128] → gate_mlp(gate_input)[128] → scale → fe×scale → Linear(128→512) → Linear(512→256) → Linear(256→128) → tower_hidden['ctr']</span><br>
+<span class="label"><span class="yellow">CVR Tower:</span> SAME structure, DIFFERENT weights. tower_hidden['cvr'] + bias_sum + ctr_logits (cvr_add_ctr_logits=true)</span><br>
+<span class="note">Same gate_input from AFP → shared partition decisions. Different tower weights → task-specific personalization.</span>
+</div>
+
+<div class="arrow">↓            ↓</div>
+
+<!-- Row 5: Logits -->
+<div class="box logit-box">
+<span class="key">FINAL LOGITS & PREDICTIONS</span><br><br>
+<span class="label">ctr_logits = Linear(128→1)(tower_hidden['ctr']) + bias_sum</span><br>
+<span class="label">cvr_logits = Linear(128→1)(tower_hidden['cvr']) + ctr_logits</span><br>
+<span class="label">pred_ctr = sigmoid(ctr_logits) | pred_cvr = sigmoid(cvr_logits)</span><br><br>
+<span class="green">UV_CTR +1.94% ✓</span> &nbsp;&nbsp;&nbsp; <span class="green">UV_CVR +3.39% ✓</span>
+</div>
+
+<!-- Right side: Example -->
+<div style="margin-top:20px;">
+<div class="box example-box" style="max-width:600px;margin-left:auto;">
+<span class="red"><b>AFP Forward — Concrete Example</b></span><br><br>
+<span class="label">Sample b=0:</span><br>
+<span class="label">keyword[16D]  → classifier_12 → logit=1.8 → p=0.86 → DNN path</span><br>
+<span class="label">day_h[8D]     → classifier_11 → logit=-1.2 → p=0.23 → Gate path</span><br>
+<span class="label">site[8D]      → classifier_10 → logit=2.1 → p=0.89 → DNN path</span><br>
+<span class="label">brand_x_price[12D] → classifier_16 → logit=-0.3 → p=0.43 → split</span><br><br>
+<span class="note">Each sample gets its OWN partition based on its actual feature values!</span><br><br>
+<span class="label"><b>Temperature schedule:</b></span><br>
+<span class="label">step=0:    T=1.00, w=0.050, p≈0.5  (random exploration)</span><br>
+<span class="label">step=3150: T=0.55, w=0.030, p≈0.7  (learning signal)</span><br>
+<span class="label">step=6300: T=0.10, w=0.010, p≈0.9  (stable routing)</span>
+</div>
+</div>
+
+<!-- Key insight -->
+<div class="box input-box" style="margin-top:20px;">
+<span class="key">KEY DESIGN PRINCIPLES</span><br><br>
+<span class="label">1. AFP does NOT change EPNet / DCNv2 / CDOT / PLE experts</span><br>
+<span class="label">   AFP ONLY affects PPNet LHUC gate inputs (which features personalize each layer)</span><br><br>
+<span class="label">2. EPNet needs COMPLETE features (global view) | PPNet uses PARTITIONED features (personalized view)</span><br>
+<span class="label">   Together: global context awareness + local personalization</span><br><br>
+<span class="label">3. Soft routing ≠ hard cut: p_i is continuous → differentiable end-to-end training</span><br>
+<span class="label">4. 17 binary classifiers ≈ 72K params (negligible vs full model) → UV_CTR +1.94%, UV_CVR +3.39%</span>
+</div>
+
+</body></html>

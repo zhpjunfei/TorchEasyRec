@@ -242,11 +242,13 @@ class PlattScaler(nn.Module):
             return torch.sigmoid(self._a * logits + self._b)
 
     def get_a(self) -> float:
+        """Return fitted or default a parameter."""
         if hasattr(self, "a"):
             return self.a.item()
         return self._a.item()
 
     def get_b(self) -> float:
+        """Return fitted or default b parameter."""
         if hasattr(self, "b"):
             return self.b.item()
         return self._b.item()
@@ -317,13 +319,14 @@ class PlattScaler(nn.Module):
         prev_loss = None
         converged = False
 
-        for iteration in range(max_iter):
+        for _step in range(max_iter):
             # z = a*x + b
             z = a * x + b
             p = torch.sigmoid(z)
 
             # Negative log likelihood
-            pw = p * w
+            # pw unused — was used in original derivation
+
             yw = y * w
             loss = (
                 -(
@@ -374,7 +377,7 @@ class PlattScaler(nn.Module):
             "b": b.item(),
             "final_loss": loss.item(),
             "converged": converged,
-            "iterations": iteration + 1,
+            "iterations": _step + 1,
         }
 
     def freeze(self) -> None:
@@ -389,4 +392,5 @@ class PlattScaler(nn.Module):
             self._frozen = True
 
     def is_frozen(self) -> bool:
+        """Check if Platt scaler is frozen."""
         return self._frozen
