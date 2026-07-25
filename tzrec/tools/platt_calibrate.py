@@ -214,19 +214,19 @@ def main() -> None:
 
     # Build features and dataloader
     features = _create_features(
-        list(pipeline_config.feature_configs), train_config.data_config
+        list(pipeline_config.feature_configs), pipeline_config.data_config
     )
 
     # Override validation input path for dataloader
     val_input_backup = None
-    if train_config.HasField("data_config"):
-        if hasattr(train_config.data_config, "val_input_path"):
-            val_input_backup = train_config.data_config.val_input_path
-            train_config.data_config.val_input_path = args.val_data_path
+    if True:
+        if hasattr(pipeline_config.data_config, "val_input_path"):
+            val_input_backup = pipeline_config.data_config.val_input_path
+            pipeline_config.data_config.val_input_path = args.val_data_path
 
     try:
         dataloader = create_dataloader(
-            data_config=train_config.data_config,
+            data_config=pipeline_config.data_config,
             features=features,
             input_path=args.val_data_path,
             mode="eval",
@@ -234,7 +234,7 @@ def main() -> None:
 
         # Create model and load trained checkpoint weights
         model = _create_model(
-            model_config, features, list(train_config.data_config.label_fields)
+            model_config, features, list(pipeline_config.data_config.label_fields)
         )
         device = torch.device(args.device)
         model = model.to(device)
@@ -282,7 +282,7 @@ def main() -> None:
     finally:
         # Restore original data path
         if val_input_backup is not None:
-            train_config.data_config.val_input_path = val_input_backup
+            pipeline_config.data_config.val_input_path = val_input_backup
 
 
 if __name__ == "__main__":

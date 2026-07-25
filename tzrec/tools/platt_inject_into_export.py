@@ -86,12 +86,11 @@ def main() -> None:
 
     pipeline_config = config_util.load_pipeline_config(args.config)
     model_config = pipeline_config.model_config
-    train_config = pipeline_config.train_config
     features = _create_features(
-        list(pipeline_config.feature_configs), train_config.data_config
+        list(pipeline_config.feature_configs), pipeline_config.data_config
     )
     model = _create_model(
-        model_config, features, list(train_config.data_config.label_fields)
+        model_config, features, list(pipeline_config.data_config.label_fields)
     )
 
     if not hasattr(model, "_platt_scalers"):
