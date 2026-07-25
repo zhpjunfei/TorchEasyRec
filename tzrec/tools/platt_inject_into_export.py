@@ -88,7 +88,7 @@ def main() -> None:
     model_config = pipeline_config.model_config
     train_config = pipeline_config.train_config
     features = _create_features(
-        list(model_config.feature_configs), train_config.data_config
+        list(pipeline_config.feature_configs), train_config.data_config
     )
     model = _create_model(
         model_config, features, list(train_config.data_config.label_fields)

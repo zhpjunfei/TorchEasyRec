@@ -214,7 +214,7 @@ def main() -> None:
 
     # Build features and dataloader
     features = _create_features(
-        list(model_config.feature_configs), train_config.data_config
+        list(pipeline_config.feature_configs), train_config.data_config
     )
 
     # Override validation input path for dataloader
