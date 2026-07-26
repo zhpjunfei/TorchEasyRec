@@ -319,15 +319,15 @@ def main() -> None:
         logger.info("Restoring from %s (step %d)", ckpt_path, step)
         try:
             restore_model(ckpt_path, model)
-        except AssertionError as e:
-            # DCP checkpoint with MC embedding sharding fails on single-GPU.
-            # The DCP load() inside restore_model succeeds but model.load_state_dict()
-            # triggers MC module's _load_state_dict_post_hook which calls validate_state().
-            # Since the model was created on single-GPU without sharding, the shard range
-            # check fails (segments tensor is all INT64_MAX).
+        except (AssertionError, RuntimeError) as e:
+            # DCP checkpoint with MC embedding sharding may fail when:
+            # - Single-GPU: shard range check fails (segments tensor is all INT64_MAX)
+            # - Multi-GPU: meta tensor .item() called in validate_state()
+            # Both cases are caused by MC module's _load_state_dict_post_hook calling
+            # validate_state() which doesn't handle the current sharding context.
             #
-            # Fix: monkey-patch validate_state to pass, then call restore_model again.
-            logger.warning("DCP restore failed (%s), patching validate_state", e)
+            # Fix: monkey-patch validate_state to pass, then retry restore_model.
+            logger.warning("DCP restore failed (%s), patching validate_state and retrying", e)
 
             # Find all MC modules and patch their validate_state
             mc_modules = []
