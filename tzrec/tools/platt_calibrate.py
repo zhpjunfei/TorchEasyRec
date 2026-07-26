@@ -211,6 +211,14 @@ def save_fitted_params(fitted_params, output_dir):
 def main() -> None:
     """Fit Platt calibration parameters on validation data."""
     """离线拟合 Platt 参数并保存。"""
+    
+    # Only run on rank 0 to avoid multi-GPU conflicts
+    import os
+    rank = int(os.environ.get("RANK", 0))
+    if rank != 0:
+        logger.info(f"Rank {rank}: skipping (only rank 0 runs)")
+        return
+    
     parser = argparse.ArgumentParser(description="Fit Platt calibration params")
     parser.add_argument("--config", required=True, help="Model config path")
     parser.add_argument(
