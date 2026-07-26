@@ -405,10 +405,14 @@ def main() -> None:
         )
         logger.info(f"Near-zero tensors (abs max < 1e-7): {zero_params}")
 
-        # Check a few key parameters (skip meta)
+        # Check a few key parameters (skip meta and empty)
         checked = 0
         for name, param in model.named_parameters():
             if param.device.type == "meta":
+                continue
+            if param.numel() == 0:
+                logger.info(f"  {name}: shape={param.shape}, device={param.device}, EMPTY(tensor)")
+                checked += 1
                 continue
             logger.info(
                 f"  {name}: shape={param.shape}, device={param.device}, "
