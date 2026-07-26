@@ -41,21 +41,18 @@ dlc submit pytorchjob \
             --train_input_path ${TRAIN_DATA_PATH} \
             --model_dir ${MODEL_DIR}
 
-        # Step 2: 拟合 Platt 参数 (用多GPU运行，保持DCP checkpoint兼容)
+        # Step 2: 拟合 Platt 参数 (单进程运行，避免多GPU冲突)
         ODPS_ENDPOINT=http://service.cn-shenzhen-vpc.maxcompute.aliyun-inc.com/api \
-        torchrun --master_addr=$MASTER_ADDR --master_port=$((MASTER_PORT + 1)) \
-            --nnodes=$WORLD_SIZE --nproc-per-node=$NPROC_PER_NODE --node_rank=$RANK \
-            -m tzrec.tools.platt_calibrate \
+        python -m tzrec.tools.platt_calibrate \
             --config ${TRAIN_CONFIG} \
             --checkpoint_dir ${MODEL_DIR} \
             --val_data_path ${VAL_DATA_PATH} \
-            --output_dir ${MODEL_DIR}/platt_fitted
+            --output_dir ${MODEL_DIR}/platt_fitted \
+            --device cuda:0
 
-        # Step 3: 注入 Platt 参数到 DCP checkpoint (多GPU保持兼容性)
+        # Step 3: 注入 Platt 参数到 DCP checkpoint (单进程运行)
         ODPS_ENDPOINT=http://service.cn-shenzhen-vpc.maxcompute.aliyun-inc.com/api \
-        torchrun --master_addr=$MASTER_ADDR --master_port=$((MASTER_PORT + 2)) \
-            --nnodes=1 --nproc-per-node=$NPROC_PER_NODE --node_rank=0 \
-            -m tzrec.tools.platt_inject_into_export \
+        python -m tzrec.tools.platt_inject_into_export \
             --config ${MODEL_DIR}/pipeline.config \
             --trained_ckpt ${MODEL_DIR} \
             --platt_meta ${MODEL_DIR}/platt_fitted/platt_meta.json \

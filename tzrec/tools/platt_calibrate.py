@@ -300,43 +300,10 @@ def main() -> None:
             model_config, features, list(pipeline_config.data_config.label_fields)
         )
 
-        # Multi-GPU: dist already initialized by torchrun — just get device
-        if dist.is_initialized():
-            device = torch.device(f"cuda:{dist.get_rank()}")
-            world_size = dist.get_world_size()
-            logger.info(
-                "Platt calib multi-GPU (torchrun): rank=%d, world_size=%d, device=%s",
-                dist.get_rank(), world_size, device,
-            )
-            rank = dist.get_rank()
-            world_size = dist.get_world_size()
-            logger.info(
-                "Platt calib multi-GPU: rank=%d, world_size=%d, device=%s",
-                rank, world_size, device,
-            )
-            
-            # Wrap model with DistributedModelParallel for correct sharding
-            from tzrec.main import create_planner, get_default_sharders
-            from torchrec.distributed.model_parallel import DistributedModelParallel
-            
-            planner = create_planner(
-                device=device,
-                batch_size=args.batch_size,
-                model=model,
-            )
-            sharders = get_default_sharders()
-            plan = planner.collective_plan(model, sharders, dist.GroupMember.WORLD)
-            model = DistributedModelParallel(
-                module=model,
-                device=device,
-                sharders=sharders,
-                plan=plan,
-            )
-            logger.info("Model wrapped with DistributedModelParallel")
-        else:
-            device = torch.device(args.device)
-            logger.info("Platt calib single-process: device=%s", device)
-            model = model.to_empty(device=device)
+        # Single-process mode: load full model on cuda:0
+        device = torch.device(args.device)
+        logger.info("Platt calib single-process: device=%s", device)
+        model = model.to_empty(device=device)
         
         logger.info("Loading trained checkpoint...")
         ckpt_path, step = latest_checkpoint(latest_ckpt)
