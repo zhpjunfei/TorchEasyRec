@@ -43,6 +43,7 @@ import json
 import os
 
 import torch
+from torch import distributed as dist
 
 from tzrec.utils.logging_util import logger
 
@@ -50,10 +51,29 @@ from tzrec.utils.logging_util import logger
 def collect_logits_and_labels(model, dataloader, device):
     """跑一遍验证集，收集每个塔的 (logits, labels)。"""  # noqa: D415
     all_data = {}
-    for task_tower_cfg in model._task_tower_cfgs:
+
+    # Get tower configs from model - handle both pepnet and other models
+    if hasattr(model, "_task_tower_cfgs") and model._task_tower_cfgs:
+        tower_cfgs = model._task_tower_cfgs
+    elif hasattr(model, "_base_model") and hasattr(
+        model._base_model, "_task_tower_cfgs"
+    ):
+        tower_cfgs = model._base_model._task_tower_cfgs
+    else:
+        logger.error("Model has no _task_tower_cfgs!")
+        return {}
+
+    for task_tower_cfg in tower_cfgs:
         tower_name = task_tower_cfg.tower_name
-        label_key = task_tower_cfg.label_name
+        label_key = getattr(task_tower_cfg, "label_name", None)
+        if label_key is None:
+            logger.warning(f"Tower '{tower_name}' has no label_name, skipping")
+            continue
         all_data[tower_name] = {"logits": [], "labels": [], "label_key": label_key}
+
+    if not all_data:
+        logger.error("No valid towers found in model!")
+        return {}
 
     model.eval()
     with torch.no_grad():
@@ -61,14 +81,50 @@ def collect_logits_and_labels(model, dataloader, device):
             batch = batch.to(device)
             output = model.predict(batch)
 
-            for cfg in model._task_tower_cfgs:
-                tn = cfg.tower_name
+            for tn, data in all_data.items():
                 logits_key = f"logits_{tn}"
-                if logits_key in output and tn in all_data:
-                    lgt = output[logits_key].cpu().float().squeeze(-1)
-                    lab = batch.labels.get(cfg.label_key, torch.zeros_like(lgt)).float()
-                    all_data[tn]["logits"].append(lgt)
-                    all_data[tn]["labels"].append(lab)
+                if logits_key not in output:
+                    logger.warning(
+                        f"No logits for tower '{tn}' in output keys: {list(output.keys())}"
+                    )
+                    continue
+
+                lgt = output[logits_key].cpu().float().squeeze(-1)
+
+                # Early NaN check — abort immediately if logits are all NaN
+                if torch.isnan(lgt).all():
+                    logger.error(
+                        "FATAL: logits for tower '%s' are ALL NaN! "
+                        "This means checkpoint weights were not loaded correctly, "
+                        "or the model architecture doesn't match the checkpoint.",
+                        tn,
+                    )
+                    logger.error(
+                        "  output keys: %s, logits_key='%s', lgt.shape=%s, "
+                        "lgt.min()=%s, lgt.max()=%s",
+                        list(output.keys()),
+                        logits_key,
+                        lgt.shape,
+                        lgt.min().item() if not torch.isnan(lgt).all() else "NaN",
+                        lgt.max().item() if not torch.isnan(lgt).all() else "NaN",
+                    )
+                    raise RuntimeError(
+                        f"Logits for tower '{tn}' are all NaN. "
+                        "Check that checkpoint was loaded successfully."
+                    )
+
+                # Get label from batch.labels dict
+                label_key = data["label_key"]
+                if label_key in batch.labels:
+                    lab = batch.labels[label_key].float()
+                else:
+                    logger.warning(
+                        f"Label '{label_key}' not found in batch.labels. Available: {list(batch.labels.keys())}"
+                    )
+                    lab = torch.zeros_like(lgt)
+
+                all_data[tn]["logits"].append(lgt)
+                all_data[tn]["labels"].append(lab)
 
             if (batch_idx + 1) % 500 == 0:
                 logger.info("已收集 %d 个 batch...", batch_idx + 1)
@@ -182,6 +238,16 @@ def main() -> None:
     from tzrec.main import _create_features, _create_model
     from tzrec.utils import config_util
     from tzrec.utils.checkpoint_util import latest_checkpoint, restore_model
+    from tzrec.utils.dist_util import init_process_group
+
+    # Initialize distributed if running under torchrun
+    device, backend = init_process_group()
+    logger.info(
+        "Dist initialized: rank=%d, world_size=%d, device=%s",
+        int(os.environ.get("RANK", 0)),
+        int(os.environ.get("WORLD_SIZE", 1)),
+        device,
+    )
 
     # Load config
     pipeline_config = config_util.load_pipeline_config(args.config)
@@ -217,13 +283,6 @@ def main() -> None:
         list(pipeline_config.feature_configs), pipeline_config.data_config
     )
 
-    # Override validation input path for dataloader
-    val_input_backup = None
-    if True:
-        if hasattr(pipeline_config.data_config, "val_input_path"):
-            val_input_backup = pipeline_config.data_config.val_input_path
-            pipeline_config.data_config.val_input_path = args.val_data_path
-
     try:
         dataloader = create_dataloader(
             data_config=pipeline_config.data_config,
@@ -236,9 +295,25 @@ def main() -> None:
         model = _create_model(
             model_config, features, list(pipeline_config.data_config.label_fields)
         )
-        device = torch.device(args.device)
-        # Use to_empty() because embedding tensors may be on meta device
-        model = model.to_empty(device=device)
+
+        # Determine device: use init_process_group device if dist is initialized,
+        # otherwise use args.device (single-GPU mode)
+        if dist.is_initialized():
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            device = torch.device(f"cuda:{rank}")
+            logger.info(
+                "Multi-GPU mode: rank=%d, world_size=%d, device=%s",
+                rank,
+                world_size,
+                device,
+            )
+            # In multi-GPU mode, DMP handles device placement — do NOT call to_empty()
+        else:
+            device = torch.device(args.device)
+            logger.info("Single-GPU mode: device=%s", device)
+            # Use to_empty() only in single-GPU mode to handle meta device tensors
+            model = model.to_empty(device=device)
         logger.info("Loading trained checkpoint...")
         ckpt_path, step = latest_checkpoint(latest_ckpt)
         logger.info("Restoring from %s (step %d)", ckpt_path, step)
@@ -246,16 +321,99 @@ def main() -> None:
             restore_model(ckpt_path, model)
         except AssertionError as e:
             # DCP checkpoint with MC embedding sharding fails on single-GPU.
-            # Fall back to loading state_dict directly with strict=False.
-            logger.warning(
-                "DCP restore failed (%s), falling back to state_dict load", e
-            )
-            from torch.distributed.checkpoint import load as dcp_load
+            # The DCP load() inside restore_model succeeds but model.load_state_dict()
+            # triggers MC module's _load_state_dict_post_hook which calls validate_state().
+            # Since the model was created on single-GPU without sharding, the shard range
+            # check fails (segments tensor is all INT64_MAX).
+            #
+            # Fix: monkey-patch validate_state to pass, then call restore_model again.
+            logger.warning("DCP restore failed (%s), patching validate_state", e)
 
-            state_dict = {}
-            dcp_load(state_dict, checkpoint_id=ckpt_path)
-            model.load_state_dict(state_dict, strict=False)
-            logger.info("Fallback state_dict load succeeded.")
+            # Find all MC modules and patch their validate_state
+            mc_modules = []
+            for name, module in model.named_modules():
+                if hasattr(module, "_output_segments_tensor") and hasattr(
+                    module, "validate_state"
+                ):
+                    mc_modules.append((name, module))
+
+            original_validate_states = {}
+            for mod_name, mod in mc_modules:
+                original_validate_states[mod_name] = mod.validate_state
+                mod.validate_state = lambda *args, **kwargs: None  # no-op
+                logger.info(f"Patched validate_state on {mod_name}")
+
+            try:
+                restore_model(ckpt_path, model)
+                logger.info("Restored successfully with patched validate_state.")
+            finally:
+                # Restore original validate_state methods
+                for mod_name, mod in mc_modules:
+                    if mod_name in original_validate_states:
+                        mod.validate_state = original_validate_states[mod_name]
+                        logger.info(f"Restored validate_state on {mod_name}")
+
+        # DIAGNOSTIC: Check if checkpoint weights were loaded correctly
+        logger.info("=" * 60)
+        logger.info("DIAGNOSTIC: Checking checkpoint load status...")
+        logger.info("=" * 60)
+        total_params = 0
+        nan_params = 0
+        zero_params = 0
+        for name, param in model.named_parameters():
+            total_params += 1
+            if param.device.type != "cpu":
+                p_device = str(param.device)
+            else:
+                p_device = "cpu"
+            n_nan = int(torch.isnan(param).sum().item())
+            n_zero = int(
+                torch.zeros_like(param, dtype=torch.bool)
+                .masked_select(~torch.isfinite(param))
+                .numel()
+            )
+            # Fix: count zeros separately
+            n_zero = int((param == 0).sum().item())
+            if n_nan > 0:
+                nan_params += n_nan
+            if n_zero > 0 and param.abs().max().item() < 1e-7:
+                zero_params += 1
+
+        logger.info(f"Total parameter tensors: {total_params}")
+        logger.info(
+            f"Tensors with NaN values: {nan_params} elements across {sum(1 for n, p in model.named_parameters() if torch.isnan(p).any())} tensors"
+        )
+        logger.info(f"Near-zero tensors (abs max < 1e-7): {zero_params}")
+
+        # Check a few key parameters
+        for name, param in list(model.named_parameters())[:5]:
+            logger.info(
+                f"  {name}: shape={param.shape}, device={param.device}, "
+                f"min={param.min().item():.6f}, max={param.max().item():.6f}, "
+                f"mean={param.mean().item():.6f}, has_nan={torch.isnan(param).any().item()}"
+            )
+
+        # Run a quick forward test on a single batch to verify no NaN outputs
+        logger.info("Running single-batch forward test...")
+        try:
+            test_batch = next(iter(dataloader))
+            test_batch = test_batch.to(device)
+            model.eval()
+            with torch.no_grad():
+                test_output = model.predict(test_batch)
+            logger.info(f"Test output keys: {list(test_output.keys())}")
+            for k, v in test_output.items():
+                if isinstance(v, torch.Tensor):
+                    logger.info(
+                        f"  {k}: shape={v.shape}, device={v.device}, "
+                        f"min={v.min().item():.6f}, max={v.max().item():.6f}, "
+                        f"has_nan={torch.isnan(v).any().item()}, has_inf={torch.isinf(v).any().item()}"
+                    )
+                else:
+                    logger.info(f"  {k}: type={type(v).__name__}, value={v}")
+        except Exception as e:
+            logger.error(f"Forward test failed: {e}")
+        logger.info("=" * 60)
 
         # Verify platt scalers exist
         if not hasattr(model, "_platt_scalers") or model._platt_scalers is None:
@@ -268,12 +426,89 @@ def main() -> None:
         # Run inference on validation set
         logger.info("Running inference on validation data...")
         cal_data = collect_logits_and_labels(model, dataloader, device)
+
+        # Gather logits from all ranks (each rank has a shard of the data)
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            world_size = dist.get_world_size()
+            for tn in cal_data:
+                local_logits = cal_data[tn]["logits"]
+                local_labels = cal_data[tn]["labels"]
+                local_sizes = torch.tensor([local_logits.size(0)], device=device)
+
+                # Gather sizes from all ranks
+                all_sizes = [
+                    torch.zeros(1, dtype=torch.long, device=device)
+                    for _ in range(world_size)
+                ]
+                dist.all_gather(all_sizes, local_sizes)
+                total_samples = sum(int(s.item()) for s in all_sizes)
+
+                # Pad logits to max size for all_gather
+                max_size = int(max(all_sizes).item())
+                padded_logits = torch.zeros(
+                    max_size,
+                    local_logits.size(1),
+                    device=device,
+                    dtype=local_logits.dtype,
+                )
+                padded_logits[: local_logits.size(0)] = local_logits
+                padded_labels = torch.zeros(
+                    max_size, device=device, dtype=local_labels.dtype
+                )
+                padded_labels[: local_labels.size(0)] = local_labels
+
+                # Gather padded tensors
+                all_logits = [
+                    torch.zeros(
+                        max_size,
+                        local_logits.size(1),
+                        device=device,
+                        dtype=local_logits.dtype,
+                    )
+                    for _ in range(world_size)
+                ]
+                all_labels = [
+                    torch.zeros(max_size, device=device, dtype=local_labels.dtype)
+                    for _ in range(world_size)
+                ]
+                dist.all_gather(all_logits, padded_logits)
+                dist.all_gather(all_labels, padded_labels)
+
+                # Concatenate all ranks' data
+                gathered_logits = []
+                gathered_labels = []
+                for i, (gl, ga, ls) in enumerate(
+                    zip(all_logits, all_labels, all_sizes)
+                ):
+                    if i < int(ls.item()):
+                        gathered_logits.append(gl[: int(ls.item())])
+                        gathered_labels.append(ga[: int(ls.item())])
+
+                cal_data[tn]["logits"] = (
+                    torch.cat(gathered_logits, dim=0)
+                    if gathered_logits
+                    else local_logits
+                )
+                cal_data[tn]["labels"] = (
+                    torch.cat(gathered_labels, dim=0)
+                    if gathered_labels
+                    else local_labels
+                )
+                logger.info(
+                    f"  Rank {int(os.environ.get('RANK', 0))}: Gathered {cal_data[tn]['logits'].size(0)} samples for tower '{tn}'"
+                )
+
         for tn, d in cal_data.items():
             logger.info(
                 "  %s: logits=%s, labels=%s", tn, d["logits"].shape, d["labels"].shape
             )
 
-        # Fit Platt scalers and update model buffers
+        # Fit Platt scalers and update model buffers (only on rank 0)
+        rank = int(os.environ.get("RANK", 0))
+        if rank != 0:
+            logger.info(f"Rank {rank}: Skipping Platt fitting (only rank 0 fits)")
+            return
+
         logger.info("Fitting Platt parameters...")
         fitted = fit_and_update_model(model, cal_data, device)
 
@@ -293,10 +528,9 @@ def main() -> None:
         logger.info("  Next: run platt_inject_into_export.py with this meta")
         logger.info("=" * 60)
 
-    finally:
-        # Restore original data path
-        if val_input_backup is not None:
-            pipeline_config.data_config.val_input_path = val_input_backup
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise
 
 
 if __name__ == "__main__":

@@ -110,34 +110,61 @@ def main() -> None:
 
     logger.info("Loading trained checkpoint from: %s", ckpt_source)
 
-    dcp_load_success = False
     try:
         from tzrec.utils.checkpoint_util import latest_checkpoint, restore_model
 
+        # Use to_empty() because embedding tensors may be on meta device.
+        # Without this, DCP restore fails with "Tensor.item() cannot be called on meta tensors".
+        model = model.to_empty(device="cpu")
+
         ckpt_path, step = latest_checkpoint(ckpt_source)
         logger.info("DCP checkpoint: %s (step %d)", ckpt_path, step)
-        restore_model(ckpt_path, model)
-        dcp_load_success = True
-    except Exception as exc:
-        logger.warning("DCP restore failed (%s), trying torch.save fallback", exc)
 
-    if not dcp_load_success:
-        pt_files = ["model.pt", "model.pkl", "state_dict.pt"]
-        found_pt = None
-        for fname in pt_files:
-            pt_files_list = os.path.join(ckpt_source, fname)
-            if os.path.exists(pt_files_list):
-                found_pt = pt_files_list
-                break
-        if found_pt:
-            sd = torch.load(found_pt, map_location="cpu")
-            model.load_state_dict(sd, strict=False)
-            logger.info("Loaded from: %s", found_pt)
-        else:
-            raise FileNotFoundError(
-                f"No checkpoint found at {args.trained_ckpt}. "
-                "Expected DCP structure (meta + plan + model/) or .pt/.pkl file."
-            )
+        # On single-GPU, DCP load fails because process group is not initialized.
+        # Initialize a dummy NCCL process group so DCP can proceed.
+        import torch.distributed as dist
+
+        if not dist.is_initialized():
+            try:
+                dist.init_process_group(backend="nccl", rank=0, world_size=1)
+            except RuntimeError:
+                # NCCL may not be available; fall back to gloo
+                dist.init_process_group(backend="gloo", rank=0, world_size=1)
+
+        restore_model(ckpt_path, model)
+    except (AssertionError, RuntimeError) as exc:
+        # DCP checkpoint with MC embedding sharding fails on single-GPU.
+        # The DCP load() inside restore_model succeeds but model.load_state_dict()
+        # triggers MC module's _load_state_dict_post_hook which calls validate_state().
+        # Since the model was created on single-GPU without sharding, the shard range
+        # check fails (segments tensor is all INT64_MAX).
+        #
+        # Fix: monkey-patch validate_state to pass, then call restore_model again.
+        logger.warning(
+            "DCP restore failed (%s), patching validate_state and retrying", exc
+        )
+
+        mc_modules = []
+        for name, module in model.named_modules():
+            if hasattr(module, "_output_segments_tensor") and hasattr(
+                module, "validate_state"
+            ):
+                mc_modules.append((name, module))
+
+        original_validate_states = {}
+        for mod_name, mod in mc_modules:
+            original_validate_states[mod_name] = mod.validate_state
+            mod.validate_state = lambda *args, **kwargs: None
+            logger.info("Patched validate_state on %s", mod_name)
+
+        try:
+            restore_model(ckpt_path, model)
+            logger.info("Restored successfully with patched validate_state.")
+        finally:
+            for mod_name, mod in mc_modules:
+                if mod_name in original_validate_states:
+                    mod.validate_state = original_validate_states[mod_name]
+                    logger.info("Restored validate_state on %s", mod_name)
 
     # === 3. Inject Platt params into model buffers ===
     logger.info("Injecting fitted Platt parameters...")

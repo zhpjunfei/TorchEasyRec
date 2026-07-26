@@ -20,11 +20,14 @@
   可用作训练损失。
 """
 
+import logging
 import math
 from typing import Optional, Tuple
 
 import torch
 from torch import nn
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # TemperatureScaler
@@ -319,22 +322,68 @@ class PlattScaler(nn.Module):
         prev_loss = None
         converged = False
 
+        # Debug: log input stats before fitting
+        logger.info("Platt fit input stats:")
+        logger.info(
+            "  logits: min=%.4f, max=%.4f, mean=%.4f, nan=%d, inf=%d",
+            x.min().item(),
+            x.max().item(),
+            x.mean().item(),
+            int(torch.isnan(x).sum().item()),
+            int(torch.isinf(x).sum().item()),
+        )
+        logger.info(
+            "  labels: pos_rate=%.4f, nan=%d, inf=%d",
+            y.mean().item(),
+            int(torch.isnan(y).sum().item()),
+            int(torch.isinf(y).sum().item()),
+        )
+
+        # Numerical stability: clip logits to prevent overflow in sigmoid
+        x = torch.clamp(x, min=-10.0, max=10.0)
+
         for _step in range(max_iter):
             # z = a*x + b
             z = a * x + b
+            # Clip z to prevent sigmoid overflow
+            z = torch.clamp(z, min=-10.0, max=10.0)
             p = torch.sigmoid(z)
+
+            # Clip probabilities to prevent log(0)
+            p = p.clamp(min=1e-7, max=1 - 1e-7)
 
             # Negative log likelihood
             # pw unused — was used in original derivation
 
             yw = y * w
-            loss = (
-                -(
-                    yw * torch.log(p.clamp(min=1e-7))
-                    + (1 - yw) * torch.log((1 - p).clamp(min=1e-7))
-                ).sum()
-                / w.sum()
-            )
+            loss = -(yw * torch.log(p) + (1 - yw) * torch.log(1 - p)).sum() / w.sum()
+
+            # Check for NaN/Inf loss
+            if torch.isnan(loss) or torch.isinf(loss):
+                logger.error(
+                    "Platt fit: loss is NaN/Inf at step %d, a=%.6f, b=%.6f",
+                    _step,
+                    a.item(),
+                    b.item(),
+                )
+                logger.error(
+                    "  z stats: min=%.4f, max=%.4f, nan=%d, inf=%d",
+                    z.min().item(),
+                    z.max().item(),
+                    int(torch.isnan(z).sum().item()),
+                    int(torch.isinf(z).sum().item()),
+                )
+                logger.error(
+                    "  p stats: min=%.4f, max=%.4f, nan=%d, inf=%d",
+                    p.min().item(),
+                    p.max().item(),
+                    int(torch.isnan(p).sum().item()),
+                    int(torch.isinf(p).sum().item()),
+                )
+                a = torch.clamp(a, min=-5.0, max=5.0)
+                b = torch.clamp(b, min=-5.0, max=5.0)
+                prev_loss = loss
+                continue
 
             if prev_loss is not None and abs(prev_loss - loss) < 1e-6:
                 converged = True
@@ -348,6 +397,10 @@ class PlattScaler(nn.Module):
             residual = p - y  # (N,)
             grad_a = (w * residual * x).sum() / w.sum()
             grad_b = (w * residual).sum() / w.sum()
+
+            # Clip gradients to prevent explosion
+            grad_a = torch.clamp(grad_a, min=-10.0, max=10.0)
+            grad_b = torch.clamp(grad_b, min=-10.0, max=10.0)
 
             # Hessian (approximate)
             hessian_a = (w * p * (1 - p) * x * x).sum() / w.sum() + 1e-6
@@ -366,6 +419,10 @@ class PlattScaler(nn.Module):
                 # Line search with damping
                 a -= 0.5 * da
                 b -= 0.5 * db
+
+            # Clamp parameters to prevent explosion
+            a = torch.clamp(a, min=-5.0, max=5.0)
+            b = torch.clamp(b, min=-5.0, max=5.0)
 
         # Save fitted parameters back to module parameters
         if hasattr(self, "a"):

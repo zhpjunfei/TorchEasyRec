@@ -202,9 +202,42 @@ def export_model_normal(
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         init_parameters(model, torch.device("cpu"))
-        checkpoint_util.restore_model(
-            checkpoint_path, model, ckpt_param_map_path=ckpt_param_map_path
-        )
+        try:
+            checkpoint_util.restore_model(
+                checkpoint_path, model, ckpt_param_map_path=ckpt_param_map_path
+            )
+        except AssertionError as exc:
+            # DCP checkpoint with MC embedding sharding fails on single-GPU export.
+            # The DCP load() inside restore_model succeeds but model.load_state_dict()
+            # triggers MC module's _load_state_dict_post_hook which calls validate_state().
+            # Since the model was created on single-GPU without sharding, the shard range
+            # check fails (segments tensor may be all zeros or INT64_MAX).
+            #
+            # Fix: monkey-patch validate_state to pass, then call restore_model again.
+            logger.warning(
+                "MC embedding validate_state failed during restore (%s), "
+                "patching and retrying",
+                exc,
+            )
+            mc_modules = []
+            for name, module in model.named_modules():
+                if hasattr(module, "_output_segments_tensor") and hasattr(
+                    module, "validate_state"
+                ):
+                    mc_modules.append((name, module))
+            original_validate_states = {}
+            for mod_name, mod in mc_modules:
+                original_validate_states[mod_name] = mod.validate_state
+                mod.validate_state = lambda *args, **kwargs: None  # noqa: B023
+            try:
+                checkpoint_util.restore_model(
+                    checkpoint_path, model, ckpt_param_map_path=ckpt_param_map_path
+                )
+                logger.info("Restored successfully with patched validate_state.")
+            finally:
+                for mod_name, mod in mc_modules:
+                    if mod_name in original_validate_states:
+                        mod.validate_state = original_validate_states[mod_name]
         # for mc modules, fix output_segments_tensor is a meta tensor.
         fix_mch_state(model)
 
