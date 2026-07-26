@@ -459,76 +459,17 @@ def main() -> None:
         logger.info("Running inference on validation data...")
         cal_data = collect_logits_and_labels(model, dataloader, device)
 
-        # Gather logits from all ranks (each rank has a shard of the data)
+        # Only use rank 0's data for Platt fitting (sufficient for calibration)
+        # Multi-GPU all-gather is complex and error-prone with DMP models.
+        # 5M+ samples on rank 0 is plenty for Platt scaling (needs ~10K min).
         if dist.is_initialized() and dist.get_world_size() > 1:
-            world_size = dist.get_world_size()
-            for tn in cal_data:
-                local_logits = cal_data[tn]["logits"]
-                local_labels = cal_data[tn]["labels"]
-                local_sizes = torch.tensor([local_logits.size(0)], device=device)
-
-                # Gather sizes from all ranks
-                all_sizes = [
-                    torch.zeros(1, dtype=torch.long, device=device)
-                    for _ in range(world_size)
-                ]
-                dist.all_gather(all_sizes, local_sizes)
-                total_samples = sum(int(s.item()) for s in all_sizes)
-
-                # Pad logits to max size for all_gather
-                max_size = int(max(all_sizes).item())
-                padded_logits = torch.zeros(
-                    max_size,
-                    local_logits.size(1),
-                    device=device,
-                    dtype=local_logits.dtype,
-                )
-                padded_logits[: local_logits.size(0)] = local_logits
-                padded_labels = torch.zeros(
-                    max_size, device=device, dtype=local_labels.dtype
-                )
-                padded_labels[: local_labels.size(0)] = local_labels
-
-                # Gather padded tensors
-                all_logits = [
-                    torch.zeros(
-                        max_size,
-                        local_logits.size(1),
-                        device=device,
-                        dtype=local_logits.dtype,
-                    )
-                    for _ in range(world_size)
-                ]
-                all_labels = [
-                    torch.zeros(max_size, device=device, dtype=local_labels.dtype)
-                    for _ in range(world_size)
-                ]
-                dist.all_gather(all_logits, padded_logits)
-                dist.all_gather(all_labels, padded_labels)
-
-                # Concatenate all ranks' data
-                gathered_logits = []
-                gathered_labels = []
-                for i, (gl, ga, ls) in enumerate(
-                    zip(all_logits, all_labels, all_sizes)
-                ):
-                    if i < int(ls.item()):
-                        gathered_logits.append(gl[: int(ls.item())])
-                        gathered_labels.append(ga[: int(ls.item())])
-
-                cal_data[tn]["logits"] = (
-                    torch.cat(gathered_logits, dim=0)
-                    if gathered_logits
-                    else local_logits
-                )
-                cal_data[tn]["labels"] = (
-                    torch.cat(gathered_labels, dim=0)
-                    if gathered_labels
-                    else local_labels
-                )
-                logger.info(
-                    f"  Rank {int(os.environ.get('RANK', 0))}: Gathered {cal_data[tn]['logits'].size(0)} samples for tower '{tn}'"
-                )
+            rank = dist.get_rank()
+            if rank != 0:
+                logger.info(f"Rank {rank}: skipping logits collection (only rank 0 collects)")
+                cal_data = {}
+            else:
+                total = sum(d["logits"].size(0) for d in cal_data.values()) if cal_data else 0
+                logger.info(f"Rank 0 collected {total} total samples across {len(cal_data)} towers")
 
         for tn, d in cal_data.items():
             logger.info(
