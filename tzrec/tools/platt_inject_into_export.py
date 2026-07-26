@@ -219,4 +219,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import os
+    rank = int(os.environ.get("RANK", 0))
+    if rank != 0:
+        import logging
+        logging.getLogger().setLevel(logging.WARNING)
+        print(f"Rank {rank}: skipping platt_inject (only rank 0 runs)")
+        exit(0)
     main()
