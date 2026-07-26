@@ -360,19 +360,14 @@ def main() -> None:
         total_params = 0
         nan_params = 0
         zero_params = 0
-        for name, param in model.named_parameters():
+        meta_count = 0
+        for _name, param in model.named_parameters():
             total_params += 1
-            if param.device.type != "cpu":
-                p_device = str(param.device)
-            else:
-                p_device = "cpu"
+            # Skip meta tensors (checkpoint not yet loaded)
+            if param.device.type == "meta":
+                meta_count += 1
+                continue
             n_nan = int(torch.isnan(param).sum().item())
-            n_zero = int(
-                torch.zeros_like(param, dtype=torch.bool)
-                .masked_select(~torch.isfinite(param))
-                .numel()
-            )
-            # Fix: count zeros separately
             n_zero = int((param == 0).sum().item())
             if n_nan > 0:
                 nan_params += n_nan
@@ -380,18 +375,31 @@ def main() -> None:
                 zero_params += 1
 
         logger.info(f"Total parameter tensors: {total_params}")
+        if meta_count > 0:
+            logger.warning(
+                f"  {meta_count} tensors are on META device — checkpoint may not be loaded yet"
+            )
         logger.info(
-            f"Tensors with NaN values: {nan_params} elements across {sum(1 for n, p in model.named_parameters() if torch.isnan(p).any())} tensors"
+            f"NaN elements: {nan_params} across "
+            f"{sum(1 for _n, p in model.named_parameters() if p.device.type != 'meta' and torch.isnan(p).any())} tensors"
         )
         logger.info(f"Near-zero tensors (abs max < 1e-7): {zero_params}")
 
-        # Check a few key parameters
-        for name, param in list(model.named_parameters())[:5]:
+        # Check a few key parameters (skip meta)
+        checked = 0
+        for name, param in model.named_parameters():
+            if param.device.type == "meta":
+                continue
             logger.info(
                 f"  {name}: shape={param.shape}, device={param.device}, "
                 f"min={param.min().item():.6f}, max={param.max().item():.6f}, "
                 f"mean={param.mean().item():.6f}, has_nan={torch.isnan(param).any().item()}"
             )
+            checked += 1
+            if checked >= 5:
+                break
+        if checked == 0:
+            logger.warning("  No non-meta parameters found to inspect")
 
         # Run a quick forward test on a single batch to verify no NaN outputs
         logger.info("Running single-batch forward test...")
