@@ -296,24 +296,40 @@ def main() -> None:
             model_config, features, list(pipeline_config.data_config.label_fields)
         )
 
-        # Determine device: use init_process_group device if dist is initialized,
-        # otherwise use args.device (single-GPU mode)
+        # Multi-GPU: init process group for DCP compatibility + DMP wrapping
         if dist.is_initialized():
+            from tzrec.utils.dist_util import init_process_group
+            device, backend = init_process_group()
             rank = dist.get_rank()
             world_size = dist.get_world_size()
-            device = torch.device(f"cuda:{rank}")
             logger.info(
-                "Multi-GPU mode: rank=%d, world_size=%d, device=%s",
-                rank,
-                world_size,
-                device,
+                "Platt calib multi-GPU: rank=%d, world_size=%d, device=%s",
+                rank, world_size, device,
             )
-            # In multi-GPU mode, DMP handles device placement — do NOT call to_empty()
+            
+            # Wrap model with DistributedModelParallel for correct sharding
+            from tzrec.main import create_planner, get_default_sharders
+            from torchrec.distributed.model_parallel import DistributedModelParallel
+            
+            planner = create_planner(
+                device=device,
+                batch_size=args.batch_size,
+                model=model,
+            )
+            sharders = get_default_sharders()
+            plan = planner.collective_plan(model, sharders, dist.GroupMember.WORLD)
+            model = DistributedModelParallel(
+                module=model,
+                device=device,
+                sharders=sharders,
+                plan=plan,
+            )
+            logger.info("Model wrapped with DistributedModelParallel")
         else:
             device = torch.device(args.device)
-            logger.info("Single-GPU mode: device=%s", device)
-            # Use to_empty() only in single-GPU mode to handle meta device tensors
+            logger.info("Platt calib single-process: device=%s", device)
             model = model.to_empty(device=device)
+        
         logger.info("Loading trained checkpoint...")
         ckpt_path, step = latest_checkpoint(latest_ckpt)
         logger.info("Restoring from %s (step %d)", ckpt_path, step)
