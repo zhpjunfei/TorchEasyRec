@@ -308,8 +308,22 @@ def main() -> None:
         logger.info("Loading trained checkpoint...")
         ckpt_path, step = latest_checkpoint(latest_ckpt)
         logger.info("Restoring from %s (step %d)", ckpt_path, step)
+        
+        # DIAGNOSTIC: Check state_dict keys before and after restore
+        pre_keys = set(model.state_dict().keys())
+        pre_sample = {k: v.shape for k, v in list(model.state_dict().items())[:3]}
+        logger.info("Pre-restore sample keys: %s", pre_sample)
+        
         try:
             restore_model(ckpt_path, model)
+            
+            # DIAGNOSTIC: Check if weights were actually loaded
+            post_sample = {k: (v.shape, float(v.mean()) if v.numel() > 0 else "empty", bool(torch.isnan(v).any())) 
+                          for k, v in list(model.state_dict().items())[:3]}
+            logger.info("Post-restore sample: %s", post_sample)
+            nan_count = sum(1 for v in model.state_dict().values() if hasattr(v, 'numel') and v.numel() > 0 and torch.isnan(v).any())
+            logger.info("Tensors with NaN after restore: %d / %d", nan_count, len(model.state_dict()))
+            
         except (AssertionError, RuntimeError) as e:
             # DCP checkpoint with MC embedding sharding may fail when:
             # - Single-GPU: shard range check fails (segments tensor is all INT64_MAX)
