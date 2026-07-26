@@ -296,10 +296,14 @@ def main() -> None:
             model_config, features, list(pipeline_config.data_config.label_fields)
         )
 
-        # Multi-GPU: init process group for DCP compatibility + DMP wrapping
+        # Multi-GPU: dist already initialized by torchrun — just get device
         if dist.is_initialized():
-            from tzrec.utils.dist_util import init_process_group
-            device, backend = init_process_group()
+            device = torch.device(f"cuda:{dist.get_rank()}")
+            world_size = dist.get_world_size()
+            logger.info(
+                "Platt calib multi-GPU (torchrun): rank=%d, world_size=%d, device=%s",
+                dist.get_rank(), world_size, device,
+            )
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             logger.info(
