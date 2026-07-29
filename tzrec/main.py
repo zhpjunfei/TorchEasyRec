@@ -845,6 +845,22 @@ def train_and_evaluate(
     )
     if is_local_rank_zero:
         logger.info("Train and Evaluate Finished.")
+        # ===== 新增：为校准任务保存全量 state_dict =====
+        if (
+            hasattr(train_config, "save_full_state_dict")
+            and train_config.save_full_state_dict
+        ):
+            full_ckpt_path = os.path.join(model_dir, "full_state_dict.pt")
+            try:
+                # Unwrap DMP (DistributedModelParallel wraps in _model)
+                model_to_save = model._model if hasattr(model, "_model") else model
+                full_state_dict = model_to_save.state_dict()
+                torch.save(full_state_dict, full_ckpt_path)
+                logger.info(f"[FULL_SD] Saved full_state_dict to {full_ckpt_path}")
+            except Exception as e:
+                logger.error(f"[FULL_SD] Failed to save full_state_dict: {e}")
+                raise
+    # =================================================
 
 
 def evaluate(

@@ -114,24 +114,37 @@ def main() -> None:
         from tzrec.utils.checkpoint_util import latest_checkpoint, restore_model
 
         # Use to_empty() because embedding tensors may be on meta device.
-        # Without this, DCP restore fails with "Tensor.item() cannot be called on meta tensors".
+        # Without this, DCP restore fails with
         model = model.to_empty(device="cpu")
 
         ckpt_path, step = latest_checkpoint(ckpt_source)
         logger.info("DCP checkpoint: %s (step %d)", ckpt_path, step)
 
-        # On single-GPU, DCP load fails because process group is not initialized.
-        # Initialize a dummy NCCL process group so DCP can proceed.
-        import torch.distributed as dist
+        # ===== 优先从 full_state_dict.pt 加载，避免 DCP 不兼容问题 =====
+        # full_state_dict 保存于 model_dir（根目录），而非具体 checkpoint subdirectory
+        full_sd_path = os.path.join(args.trained_ckpt, "full_state_dict.pt")
+        if os.path.exists(full_sd_path):
+            logger.info(f"Loading model from full_state_dict: {full_sd_path}")
+            state_dict = torch.load(full_sd_path, map_location="cpu")
+            state_dict_mapped = {
+                k[6:] if k.startswith("model.") else k: v for k, v in state_dict.items()
+            }
+            model.load_state_dict(state_dict_mapped, strict=False)
+        else:
+            logger.warning("full_state_dict not found, falling back to DCP restore")
+            # On single-GPU, DCP load fails because process group is not initialized.
+            # Initialize a dummy NCCL process group so DCP can proceed.
+            import torch.distributed as dist
 
-        if not dist.is_initialized():
-            try:
-                dist.init_process_group(backend="nccl", rank=0, world_size=1)
-            except RuntimeError:
-                # NCCL may not be available; fall back to gloo
-                dist.init_process_group(backend="gloo", rank=0, world_size=1)
+            if not dist.is_initialized():
+                try:
+                    dist.init_process_group(backend="nccl", rank=0, world_size=1)
+                except RuntimeError:
+                    # NCCL may not be available; fall back to gloo
+                    dist.init_process_group(backend="gloo", rank=0, world_size=1)
 
-        restore_model(ckpt_path, model)
+            restore_model(ckpt_path, model)
+        # ===============================================================
     except (AssertionError, RuntimeError) as exc:
         # DCP checkpoint with MC embedding sharding fails on single-GPU.
         # The DCP load() inside restore_model succeeds but model.load_state_dict()
@@ -190,6 +203,12 @@ def main() -> None:
     dcp_save(patched_sd, checkpoint_id=dcp_model_file)
     logger.info("Saved patched DCP checkpoint to: %s", args.output)
 
+    # ===== 同时保存标准 PyTorch full_state_dict 供校准使用 =====
+    full_sd_path = os.path.join(args.output, "full_state_dict.pt")
+    torch.save(patched_sd, full_sd_path)
+    logger.info(f"Saved full_state_dict to {full_sd_path}")
+    # =====================================================
+
     # Save metadata about the patch for traceability
     with open(os.path.join(args.output, "platt_patch_meta.json"), "w") as f:
         json.dump(
@@ -220,9 +239,11 @@ def main() -> None:
 
 if __name__ == "__main__":
     import os
+
     rank = int(os.environ.get("RANK", 0))
     if rank != 0:
         import logging
+
         logging.getLogger().setLevel(logging.WARNING)
         print(f"Rank {rank}: skipping platt_inject (only rank 0 runs)")
         exit(0)

@@ -42,7 +42,7 @@ message TrainConfig {
     optional uint32 save_checkpoints_steps = 5 [default = 1000];
     // checkpoint to restore parameters from
     optional string fine_tune_checkpoint = 6;
-    // checkpoint to restore parameters mapping, each line is {param name in current model}\\t{param name in old ckpt}
+    // checkpoint to restore parameters mapping, each line is {param name in current model}\t{param name in old ckpt}
     optional string fine_tune_ckpt_param_map = 7;
     // the frequency the loss and lr will be logged during training
     optional uint32 log_step_count_steps = 8 [default = 100];
@@ -70,5 +70,6 @@ message TrainConfig {
     optional uint32 gradient_accumulation_steps = 18;
     // dense gradient clipping config
     optional GradClipping grad_clipping = 19;
-    // TBD: qcomm config
+    // Whether to save full non-sharded state_dict for calibration tasks (e.g., platt calibration)
+    optional bool save_full_state_dict = 20;
 }

@@ -1,5 +1,7 @@
 # AGENTS.md — Agnes-2.0-Flash 工作规则
 
+**请务必使用中文回复**
+
 ## 核心原则
 
 ### 1. 先思考，后编码
@@ -80,108 +82,8 @@ ______________________________________________________________________
 
 - 基线单 Epoch 后已开始过拟合，多 Epoch 无意义
 
-### BUG FIX: set_current_step 在 epoch-based 训练下从未被调用 (2026-07-17)
-
-**根因：** `set_current_step()` 调用被 `use_step` 条件守卫，但所有实验配置使用 `num_epochs: 1` 而非 `num_steps`，导致 `use_step = False`。
-
-**修复：** 去掉 `use_step` 条件，仅保留 `hasattr` 向后兼容检查。
-
-**影响：** 修复前方案 B/D 的 calibration_loss 始终为 0（\_current_step 始终为 0，schedule 返回 0.0 权重）。修复后 progressive schedule 真正生效。
-
-**注意：** `anneal_temperature` 同样受 `use_step` 守卫，但 AFP 温度调度是已有功能，暂不改动。
-
 ### BUG FIX: FX tracing 期间 Proxy 变量不可用于控制流 (2026-07-18)
-
-**现象：** `torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow`
-
-**根因：** PipelineParallel 训练和 model export 阶段会调用 FX symbolic trace 对 `forward()` 进行图追踪。追踪期间，所有 tensor 运算结果变成 `Proxy` 对象，**不能用于 `if/while/for` 控制流判断**（如 `if total_entropy > 0:`、`if ent is not None:` 等）。
-
-**常见触发场景：**
-
-1. 在 `loss()` 方法中累加 tensor 值后做 `if > 0:` 判断
-1. 在 `loss()` 方法中使用 `getattr` 获取 tensor 属性后判断 `is not None`
-1. 在 `forward()` 方法中访问 `scaler.get_temperature().item()`（已有 `isinstance(Proxy)` guard 的除外）
-
-**修复原则：**
-
-- **外层 guard 优先：** 将 `is_fx_tracing()` 检查放在**整个涉及 tensor 比较/累加的代码块外层**，而不是内部某一行。内层 guard 太晚——Proxy 已经在前面被创建/累加了。
-- **已有模式参考：** calibration loss 和 contrastive loss 中使用 `isinstance(x, torch.fx.Proxy)` 检查后 `break`，这是正确的做法。
-- **import：** `from torch.fx._symbolic_trace import is_fx_tracing`
-
-**反面示例（错误）：**
-
-```python
-# ❌ 内层 guard 太晚——total_entropy 已经是 Proxy
-total_entropy += ent  # ← Proxy 在这里产生
-if not is_fx_tracing():  # ← 太晚了！
-    if total_entropy > 0:  # ← TraceError!
-```
-
-**正面示例（正确）：**
-
-```python
-# ✅ 外层 guard 完全跳过 Proxy 区域
-if not is_fx_tracing():
-    total_entropy = 0.0
-    for afp_mod in afp_list:
-        ent = getattr(afp_mod, "_partition_entropy", None)
-        total_entropy += ent
-    if total_entropy > 0:  # ← 正常 float 比较，安全
-```
-
-**经验教训：**
 
 - 每次在 `loss()` 或 `forward()` 中引入涉及 tensor 运算+控制流的代码时，第一时间考虑 FX tracing 兼容性
 - 不要只 guard `torch.tensor()` 那一行——整个计算链都需要被保护
 - `is_fx_tracing()` 检查应该包裹**整个**可能产生 Proxy 的代码块
-
-## PCGrad 梯度手术实现规范
-
-### 核心原则
-
-- 所有梯度手术类（PCGrad、Pareto、UncertaintyWeight 等）必须通过 **loss key 名称** 识别任务角色，而非依赖 dict 遍历顺序。
-- 默认参数必须是显式传参，禁止依赖隐式默认值。
-- `.reshape(-1)` 而非 `.view(-1)`：DDP/TorchRec 分布式环境下梯度 tensor 可能不连续。
-- 混合精度安全：`_flatten_grads` 中 `torch.zeros` 的 dtype 必须与 `params[0].dtype` 一致。
-
-### 典型反模式
-
-```python
-# ❌ 依赖 dict 顺序推断任务优先级
-for i, (name, loss_val) in enumerate(losses.items()):
-    # name 可能是 "binary_cross_entropy_ctr" 或任意 key
-    # 顺序变了，CVR 优先就失效了
-
-# ❌ view(-1) 在 DDP 下崩溃
-grads.append(g.view(-1))
-
-# ✅ 通过 key 识别任务
-ctr_keys = [k for k in losses if "ctr" in k]
-cvr_keys = [k for k in losses if "cvr" in k or "ctcvr" in k]
-```
-
-## PCGrad OOM 修复经验 (2026-07-20)
-
-### 问题
-
-`retain_graph=True` 在 30GB+ 模型上 OOM。前向激活图本身占 30GB，
-`retain_graph` 阻止中间激活被释放，第二次 `autograd.grad` 时没有内存。
-
-### 解决方案
-
-- 主路径：通过 `predict_fn` + `loss_fn` 参数，每任务重算 forward，
-  backward 后立即释放激活图，peak memory = O(forward_graph)。
-  开销：N 次 forward ≈ 20% 额外时间，换来 OOM 消除。
-- 回退路径：detach 其他任务 loss 后调用 `autograd.grad`，
-  仅在 `predict_fn` 不可用时使用（小模型）。
-
-### 关键约束
-
-- `backward()` 不接受 `allow_unused` 参数，只有 `autograd.grad()` 接受。
-- DDP 下 `.reshape(-1)` 而非 `.view(-1)`（tensor 可能不连续）。
-- backward hook 中 `_patch_gradients` 必须直接赋值 `p.grad`，
-  不能检查 `p.grad is None` 后 continue（首次调用时全是 None）。
-
-## 工具调用反模式（2026-07-24）
-
-**BUG: 重复执行相同命令导致无限循环 — 每次工具调用后先判断信息是否已足够，足够就停止并分析结论，不足够再换方向获取新信息。**

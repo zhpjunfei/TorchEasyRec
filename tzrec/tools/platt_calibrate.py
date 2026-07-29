@@ -211,10 +211,11 @@ def save_fitted_params(fitted_params, output_dir):
 def main() -> None:
     """Fit Platt calibration parameters on validation data."""
     """离线拟合 Platt 参数并保存。"""
-    
+
     import os
+
     rank = int(os.environ.get("RANK", 0))
-    
+
     parser = argparse.ArgumentParser(description="Fit Platt calibration params")
     parser.add_argument("--config", required=True, help="Model config path")
     parser.add_argument(
@@ -304,26 +305,99 @@ def main() -> None:
         device = torch.device(args.device)
         logger.info("Platt calib single-process: device=%s", device)
         model = model.to_empty(device=device)
-        
+
         logger.info("Loading trained checkpoint...")
         ckpt_path, step = latest_checkpoint(latest_ckpt)
         logger.info("Restoring from %s (step %d)", ckpt_path, step)
-        
+
         # DIAGNOSTIC: Check state_dict keys before and after restore
-        pre_keys = set(model.state_dict().keys())
         pre_sample = {k: v.shape for k, v in list(model.state_dict().items())[:3]}
         logger.info("Pre-restore sample keys: %s", pre_sample)
-        
+
         try:
-            restore_model(ckpt_path, model)
-            
+            # ===== 优先从 full_state_dict.pt 加载，规避 DCP 格式不兼容问题 =====
+            # full_state_dict 保存于 ckpt_dir（根目录）而非 checkpoint subdirectory
+            full_sd_path = os.path.join(ckpt_dir, "full_state_dict.pt")
+            if os.path.exists(full_sd_path):
+                logger.info(
+                    f"Loading calibration model from full_state_dict: {full_sd_path}"
+                )
+                state_dict = torch.load(
+                    full_sd_path, map_location=device, weights_only=False
+                )
+
+                # Strip "model." prefix from saved state_dict keys.
+                # Saved state_dict (from DistributedModelParallel) has "model." prefix,
+                # but bare model expects keys without prefix.
+                state_dict_mapped = {}
+                for k, v in state_dict.items():
+                    new_k = k[6:] if k.startswith("model.") else k
+                    state_dict_mapped[new_k] = v
+
+                ka_msg = (
+                    f"\x1b[93m[KEY PREFIX ANALYSIS] Total keys after mapping:"
+                    f" {len(state_dict_mapped)}\x1b[0m"
+                )
+                print(ka_msg)
+                # ===================================
+
+                # Load via model_target (matches training's model._model pattern)
+                model_target = model._model if hasattr(model, "_model") else model
+                load_result = model_target.load_state_dict(
+                    state_dict_mapped, strict=False
+                )
+                if load_result.missing_keys:
+                    logger.warning("Missing keys: %s", load_result.missing_keys)
+                if load_result.unexpected_keys:
+                    logger.warning("Unexpected keys: %s", load_result.unexpected_keys)
+
+                # Verify no NaN after load
+                nan_count = sum(
+                    1
+                    for _, p in model_target.named_parameters()
+                    if torch.isnan(p).any()
+                )
+                total_params = sum(1 for _ in model_target.named_parameters())
+                lv_msg = (
+                    f"\x1b[91m[LOAD VERIFICATION] {nan_count}/{total_params}"
+                    f" parameters are NaN\x1b[0m"
+                )
+                print(lv_msg)
+                if nan_count > 0:
+                    err_msg = (
+                        f"\x1b[91mLOAD FAILED:\x1b[0m"
+                        f" {nan_count}/{total_params} params are NaN!"
+                    )
+                    raise RuntimeError(err_msg)
+            else:
+                logger.warning(
+                    "full_state_dict not found, attempting DCP restore "
+                    "(may fail on multi-GPU checkpoints)"
+                )
+                restore_model(ckpt_path, model)
+            # ===============================================================
+
             # DIAGNOSTIC: Check if weights were actually loaded
-            post_sample = {k: (v.shape, float(v.mean()) if v.numel() > 0 else "empty", bool(torch.isnan(v).any())) 
-                          for k, v in list(model.state_dict().items())[:3]}
+            post_sample = {
+                k: (
+                    v.shape,
+                    float(v.mean()) if v.numel() > 0 else "empty",
+                    bool(torch.isnan(v).any()),
+                )
+                for k, v in list(model.state_dict().items())[:3]
+            }
             logger.info("Post-restore sample: %s", post_sample)
-            nan_count = sum(1 for v in model.state_dict().values() if hasattr(v, 'numel') and v.numel() > 0 and torch.isnan(v).any())
-            logger.info("Tensors with NaN after restore: %d / %d", nan_count, len(model.state_dict()))
-            
+            nan_count = sum(
+                1
+                for v in model.state_dict().values()
+                if hasattr(v, "numel") and v.numel() > 0 and torch.isnan(v).any()
+            )
+            logger.info(
+                "Tensors with NaN after restore: %d / %d",
+                nan_count,
+                len(model.state_dict()),
+            )
+
         except (AssertionError, RuntimeError) as e:
             # DCP checkpoint with MC embedding sharding may fail when:
             # - Single-GPU: shard range check fails (segments tensor is all INT64_MAX)
@@ -332,7 +406,9 @@ def main() -> None:
             # validate_state() which doesn't handle the current sharding context.
             #
             # Fix: monkey-patch validate_state to pass, then retry restore_model.
-            logger.warning("DCP restore failed (%s), patching validate_state and retrying", e)
+            logger.warning(
+                "DCP restore failed (%s), patching validate_state and retrying", e
+            )
 
             # Find all MC modules and patch their validate_state
             mc_modules = []
@@ -396,7 +472,9 @@ def main() -> None:
             if param.device.type == "meta":
                 continue
             if param.numel() == 0:
-                logger.info(f"  {name}: shape={param.shape}, device={param.device}, EMPTY(tensor)")
+                logger.info(
+                    f"  {name}: shape={param.shape}, device={param.device}, EMPTY(tensor)"
+                )
                 checked += 1
                 continue
             logger.info(
@@ -450,11 +528,19 @@ def main() -> None:
         if dist.is_initialized() and dist.get_world_size() > 1:
             rank = dist.get_rank()
             if rank != 0:
-                logger.info(f"Rank {rank}: skipping logits collection (only rank 0 collects)")
+                logger.info(
+                    f"Rank {rank}: skipping logits collection (only rank 0 collects)"
+                )
                 cal_data = {}
             else:
-                total = sum(d["logits"].size(0) for d in cal_data.values()) if cal_data else 0
-                logger.info(f"Rank 0 collected {total} total samples across {len(cal_data)} towers")
+                total = (
+                    sum(d["logits"].size(0) for d in cal_data.values())
+                    if cal_data
+                    else 0
+                )
+                logger.info(
+                    f"Rank 0 collected {total} total samples across {len(cal_data)} towers"
+                )
 
         for tn, d in cal_data.items():
             logger.info(

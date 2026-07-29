@@ -8,5 +8,16 @@
       "path": "AGENTS.md",
       "description": "Agent instructions for this project"
     }
+  },
+  "mcp": {
+    "codegraph": {
+      "type": "local",
+      "command": [
+        "codegraph",
+        "serve",
+        "--mcp"
+      ],
+      "enabled": true
+    }
   }
 }
