@@ -110,74 +110,89 @@ def main() -> None:
 
     logger.info("Loading trained checkpoint from: %s", ckpt_source)
 
-    try:
-        from tzrec.utils.checkpoint_util import latest_checkpoint, restore_model
+    # Initialize dummy dist group for single-GPU DCP load
+    import torch.distributed as dist
+    from torch.distributed.checkpoint import FileSystemReader
+    from torch.distributed.checkpoint import load as dcp_load
 
-        # Use to_empty() because embedding tensors may be on meta device.
-        # Without this, DCP restore fails with
-        model = model.to_empty(device="cpu")
+    from tzrec.utils.checkpoint_util import PartialLoadPlanner, latest_checkpoint
 
-        ckpt_path, step = latest_checkpoint(ckpt_source)
-        logger.info("DCP checkpoint: %s (step %d)", ckpt_path, step)
-
-        # ===== 优先从 full_state_dict.pt 加载，避免 DCP 不兼容问题 =====
-        # full_state_dict 保存于 model_dir（根目录），而非具体 checkpoint subdirectory
-        full_sd_path = os.path.join(args.trained_ckpt, "full_state_dict.pt")
-        if os.path.exists(full_sd_path):
-            logger.info(f"Loading model from full_state_dict: {full_sd_path}")
-            state_dict = torch.load(full_sd_path, map_location="cpu")
-            state_dict_mapped = {
-                k[6:] if k.startswith("model.") else k: v for k, v in state_dict.items()
-            }
-            model.load_state_dict(state_dict_mapped, strict=False)
-        else:
-            logger.warning("full_state_dict not found, falling back to DCP restore")
-            # On single-GPU, DCP load fails because process group is not initialized.
-            # Initialize a dummy NCCL process group so DCP can proceed.
-            import torch.distributed as dist
-
-            if not dist.is_initialized():
-                try:
-                    dist.init_process_group(backend="nccl", rank=0, world_size=1)
-                except RuntimeError:
-                    # NCCL may not be available; fall back to gloo
-                    dist.init_process_group(backend="gloo", rank=0, world_size=1)
-
-            restore_model(ckpt_path, model)
-        # ===============================================================
-    except (AssertionError, RuntimeError) as exc:
-        # DCP checkpoint with MC embedding sharding fails on single-GPU.
-        # The DCP load() inside restore_model succeeds but model.load_state_dict()
-        # triggers MC module's _load_state_dict_post_hook which calls validate_state().
-        # Since the model was created on single-GPU without sharding, the shard range
-        # check fails (segments tensor is all INT64_MAX).
-        #
-        # Fix: monkey-patch validate_state to pass, then call restore_model again.
-        logger.warning(
-            "DCP restore failed (%s), patching validate_state and retrying", exc
-        )
-
-        mc_modules = []
-        for name, module in model.named_modules():
-            if hasattr(module, "_output_segments_tensor") and hasattr(
-                module, "validate_state"
-            ):
-                mc_modules.append((name, module))
-
-        original_validate_states = {}
-        for mod_name, mod in mc_modules:
-            original_validate_states[mod_name] = mod.validate_state
-            mod.validate_state = lambda *args, **kwargs: None
-            logger.info("Patched validate_state on %s", mod_name)
-
+    if not dist.is_initialized():
         try:
-            restore_model(ckpt_path, model)
-            logger.info("Restored successfully with patched validate_state.")
-        finally:
-            for mod_name, mod in mc_modules:
-                if mod_name in original_validate_states:
-                    mod.validate_state = original_validate_states[mod_name]
-                    logger.info("Restored validate_state on %s", mod_name)
+            dist.init_process_group(backend="nccl", rank=0, world_size=1)
+        except RuntimeError:
+            dist.init_process_group(backend="gloo", rank=0, world_size=1)
+
+    model = model.to_empty(device="cpu")
+
+    ckpt_path, step = latest_checkpoint(ckpt_source)
+    logger.info("DCP checkpoint: %s (step %d)", ckpt_path, step)
+
+    # DCP bridge: read metadata then find matching key prefix
+    model_ckpt_path = os.path.join(ckpt_path, "model")
+    logger.info("DCP bridge: loading from %s", model_ckpt_path)
+
+    ckpt_metadata = FileSystemReader(model_ckpt_path).read_metadata()
+    ckpt_keys = set(ckpt_metadata.state_dict_metadata.keys())
+    logger.info("Checkpoint metadata: %d keys total", len(ckpt_keys))
+
+    bare_sd_template = model.state_dict()
+    bridge_sd = {}
+    bare_to_ckpt = {}
+
+    for bare_key, template_tensor in bare_sd_template.items():
+        for ckpt_key in (
+            bare_key,
+            f"model.{bare_key}",
+            f"_dmp_wrapped_module.module.{bare_key}",
+            f"_dmp_wrapped_module.module.model.{bare_key}",
+            f"_dmp_wrapped_module.{bare_key}",
+            f"module.{bare_key}",
+        ):
+            if ckpt_key in ckpt_keys:
+                bridge_sd[ckpt_key] = torch.zeros_like(template_tensor)
+                bare_to_ckpt[bare_key] = ckpt_key
+                break
+        else:
+            logger.warning("No checkpoint key matched for bare param [%s]", bare_key)
+
+    logger.info(
+        "Bridge: matched %d / %d bare params to checkpoint keys",
+        len(bare_to_ckpt),
+        len(bare_sd_template),
+    )
+
+    dcp_load(bridge_sd, checkpoint_id=model_ckpt_path, planner=PartialLoadPlanner())
+
+    # Build reverse map + use load_state_dict for AutoDisEmbedding per-feature slices
+    ckpt_to_bare = {v: k for k, v in bare_to_ckpt.items()}
+    bare_sd = {}
+    for ckpt_key, loaded_tensor in bridge_sd.items():
+        bare_key = ckpt_to_bare.get(ckpt_key)
+        if bare_key is not None:
+            bare_sd[bare_key] = loaded_tensor
+
+    mc_modules = []
+    for name, module in model.named_modules():
+        if hasattr(module, "_output_segments_tensor") and hasattr(
+            module, "validate_state"
+        ):
+            mc_modules.append((name, module))
+    original_validate_states = {}
+    for mod_name, mod in mc_modules:
+        original_validate_states[mod_name] = mod.validate_state
+        mod.validate_state = lambda *args, **kwargs: None
+
+    try:
+        load_result = model.load_state_dict(bare_sd, strict=False)
+        if load_result.missing_keys:
+            logger.warning("Missing keys: %d", len(load_result.missing_keys))
+        if load_result.unexpected_keys:
+            logger.warning("Unexpected keys: %d", len(load_result.unexpected_keys))
+    finally:
+        for mod_name, mod in mc_modules:
+            if mod_name in original_validate_states:
+                mod.validate_state = original_validate_states[mod_name]
 
     # === 3. Inject Platt params into model buffers ===
     logger.info("Injecting fitted Platt parameters...")
@@ -202,12 +217,6 @@ def main() -> None:
     dcp_model_file = os.path.join(args.output, "model")
     dcp_save(patched_sd, checkpoint_id=dcp_model_file)
     logger.info("Saved patched DCP checkpoint to: %s", args.output)
-
-    # ===== 同时保存标准 PyTorch full_state_dict 供校准使用 =====
-    full_sd_path = os.path.join(args.output, "full_state_dict.pt")
-    torch.save(patched_sd, full_sd_path)
-    logger.info(f"Saved full_state_dict to {full_sd_path}")
-    # =====================================================
 
     # Save metadata about the patch for traceability
     with open(os.path.join(args.output, "platt_patch_meta.json"), "w") as f:

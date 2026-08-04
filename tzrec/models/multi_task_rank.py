@@ -55,6 +55,17 @@ class MultiTaskRank(RankModel):
         self._use_ctcvr_loss = model_config.use_ctcvr_loss
         self._ctcvr_loss_weight = model_config.ctcvr_loss_weight
 
+        # Resolve CTR/CVR tower configs for CTCVR loss
+        self._ctcvr_ctr_cfg = None
+        self._ctcvr_cvr_cfg = None
+        if self._use_ctcvr_loss:
+            for tc in self._task_tower_cfgs:
+                tn = tc.tower_name
+                if tn == "ctr":
+                    self._ctcvr_ctr_cfg = tc
+                elif tn == "cvr":
+                    self._ctcvr_cvr_cfg = tc
+
     def _multi_task_output_to_prediction(
         self, output: Dict[str, torch.Tensor]
     ) -> Dict[str, torch.Tensor]:
@@ -109,10 +120,10 @@ class MultiTaskRank(RankModel):
         losses = OrderedDict()
         for task_tower_cfg in self._task_tower_cfgs:
             tower_name = task_tower_cfg.tower_name
-            label_name = task_tower_cfg.label_name
-            # ESMM mode: CVR tower trained only via CTCVR loss, skip its BCE
-            if self._use_ctcvr_loss and label_name == "is_conversion":
+            # ESMM mode: CVR tower trained only via CTCVR loss
+            if self._ctcvr_cvr_cfg and tower_name == self._ctcvr_cvr_cfg.tower_name:
                 continue
+            label_name = task_tower_cfg.label_name
             if self.has_weight(task_tower_cfg):
                 if task_tower_cfg.sample_weight_name:
                     sample_weight = task_tower_cfg.sample_weight_name
@@ -153,8 +164,16 @@ class MultiTaskRank(RankModel):
         if self._use_ctcvr_loss:
             ctr_probs = predictions.get("probs_ctr")
             cvr_probs = predictions.get("probs_cvr")
-            ctr_label = batch.labels.get("is_click")
-            cvr_label = batch.labels.get("is_conversion")
+            ctr_ln = (
+                self._ctcvr_ctr_cfg.label_name if self._ctcvr_ctr_cfg else "is_click"
+            )
+            cvr_ln = (
+                self._ctcvr_cvr_cfg.label_name
+                if self._ctcvr_cvr_cfg
+                else "is_conversion"
+            )
+            ctr_label = batch.labels.get(ctr_ln)
+            cvr_label = batch.labels.get(cvr_ln)
             if ctr_probs is not None and cvr_probs is not None:
                 ctcvr_probs = ctr_probs * cvr_probs
                 ctcvr_label = ctr_label * cvr_label
@@ -186,8 +205,10 @@ class MultiTaskRank(RankModel):
                     num_class=task_tower_cfg.num_class,
                     suffix=f"_{tower_name}",
                 )
-            label_name = task_tower_cfg.label_name
-            if self._use_ctcvr_loss and label_name == "is_conversion":
+            if (
+                self._ctcvr_cvr_cfg
+                and task_tower_cfg.tower_name == self._ctcvr_cvr_cfg.tower_name
+            ):
                 continue
             for loss_cfg in task_tower_cfg.losses:
                 self._init_loss_metric_impl(loss_cfg, suffix=f"_{tower_name}")
@@ -218,7 +239,10 @@ class MultiTaskRank(RankModel):
                     suffix=f"_{tower_name}",
                 )
             if losses is not None:
-                if self._use_ctcvr_loss and label_name == "is_conversion":
+                if (
+                    self._ctcvr_cvr_cfg
+                    and task_tower_cfg.tower_name == self._ctcvr_cvr_cfg.tower_name
+                ):
                     continue
                 for loss_cfg in task_tower_cfg.losses:
                     self._update_loss_metric_impl(

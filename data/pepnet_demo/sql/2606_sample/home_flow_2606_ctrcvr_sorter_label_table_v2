@@ -1,0 +1,304 @@
+SET odps.sql.type.system.odps2 = true
+;
+
+CREATE TABLE IF NOT EXISTS home_flow_2606_ctrcvr_sorter_label_table_v2
+(
+    event_unix_time       BIGINT
+    ,__item_id__          STRING
+    ,item_id              STRING
+    ,scene                STRING
+    ,__mmb_id__           STRING
+    ,mmb_id               STRING
+    ,request_id           STRING
+    ,page                 STRING
+    ,day_h                BIGINT COMMENT 'event_time在当天的第几小时'
+    ,week_day             BIGINT COMMENT 'event_time在一周得第几天'
+    ,is_click             BIGINT
+    ,is_conversion        BIGINT
+    ,is_favorite          BIGINT
+    ,is_like              BIGINT
+    ,is_search_exposure   BIGINT
+    ,is_search_click      BIGINT
+    ,is_search_conversion BIGINT
+    ,is_chajia_click      BIGINT
+)
+PARTITIONED BY
+(
+    dt                    STRING
+)
+LIFECYCLE 90
+;
+
+-- ----------------------------------------------------------------------
+-- 原始明细：保留请求级粒度，不做 (user,item) 维度压缩
+-- ----------------------------------------------------------------------
+WITH raw AS
+(
+    SELECT  event_unix_time
+            ,item_id
+            ,mmb_id
+            ,request_id
+            ,scene
+            ,page
+            ,day_h
+            ,week_day
+            ,event
+    FROM    home_flow_2606_dwd_log_zhekou_rec_user_bhv_info_preprocess_v2
+    WHERE   dt = '${bdp.system.bizdate}'
+)
+
+-- ----------------------------------------------------------------------
+-- 推荐侧行为：按 (user, item, request_id) 聚合成一条请求级样本
+-- ----------------------------------------------------------------------
+, rec_sample AS
+(
+    SELECT  MIN(event_unix_time)                              AS event_unix_time
+            ,item_id                                          AS item_id
+            ,mmb_id                                           AS mmb_id
+            ,request_id                                       AS request_id
+            ,MAX(scene)                                       AS scene
+            ,MAX(page)                                        AS page
+            ,MAX(day_h)                                       AS day_h
+            ,MAX(week_day)                                    AS week_day
+            ,MAX(IF(event = 'exposure',    1, 0))            AS is_exposure
+            ,MAX(IF(event = 'click',       1, 0))            AS is_click
+            ,MAX(IF(event = 'conversion',  1, 0))            AS is_conversion
+            ,MAX(IF(event = 'favorite',    1, 0))            AS is_favorite
+            ,MAX(IF(event = 'like',        1, 0))            AS is_like
+            ,CAST(0 AS BIGINT)                                AS is_search_exposure
+            ,CAST(0 AS BIGINT)                                AS is_search_click
+            ,CAST(0 AS BIGINT)                                AS is_search_conversion
+            ,CAST(0 AS BIGINT)                                AS is_chajia_click
+    FROM    raw
+    WHERE   event IN ('exposure', 'click', 'conversion', 'favorite', 'like')
+    AND     request_id IS NOT NULL
+    GROUP BY item_id
+             ,mmb_id
+             ,request_id
+)
+
+-- ----------------------------------------------------------------------
+-- 搜索侧行为：按 (user, item, request_id) 聚合
+-- ----------------------------------------------------------------------
+, search_sample AS
+(
+    SELECT  MIN(event_unix_time)                              AS event_unix_time
+            ,item_id                                          AS item_id
+            ,mmb_id                                           AS mmb_id
+            ,request_id                                       AS request_id
+            ,MAX(scene)                                       AS scene
+            ,MAX(page)                                        AS page
+            ,MAX(day_h)                                       AS day_h
+            ,MAX(week_day)                                    AS week_day
+            ,CAST(0 AS BIGINT)                                AS is_exposure
+            ,CAST(0 AS BIGINT)                                AS is_click
+            ,CAST(0 AS BIGINT)                                AS is_conversion
+            ,CAST(0 AS BIGINT)                                AS is_favorite
+            ,CAST(0 AS BIGINT)                                AS is_like
+            ,MAX(IF(event = 'search_exposure',   1, 0))      AS is_search_exposure
+            ,MAX(IF(event = 'search_click',      1, 0))      AS is_search_click
+            ,MAX(IF(event = 'search_conversion', 1, 0))      AS is_search_conversion
+            ,CAST(0 AS BIGINT)                                AS is_chajia_click
+    FROM    raw
+    WHERE   event IN ('search_exposure', 'search_click', 'search_conversion')
+    AND     request_id IS NOT NULL
+    GROUP BY item_id
+             ,mmb_id
+             ,request_id
+)
+
+-- ----------------------------------------------------------------------
+-- 比价行为：无曝光，按 (user, item, event_unix_time) 每条点击独立成样本
+-- ----------------------------------------------------------------------
+, chajia_sample AS
+(
+    SELECT  event_unix_time                                   AS event_unix_time
+            ,item_id                                          AS item_id
+            ,mmb_id                                           AS mmb_id
+            ,CAST(NULL AS STRING)                             AS request_id
+            ,MAX(scene)                                       AS scene
+            ,MAX(page)                                        AS page
+            ,MAX(day_h)                                       AS day_h
+            ,MAX(week_day)                                    AS week_day
+            ,CAST(0 AS BIGINT)                                AS is_exposure
+            ,CAST(0 AS BIGINT)                                AS is_click
+            ,CAST(0 AS BIGINT)                                AS is_conversion
+            ,CAST(0 AS BIGINT)                                AS is_favorite
+            ,CAST(0 AS BIGINT)                                AS is_like
+            ,CAST(0 AS BIGINT)                                AS is_search_exposure
+            ,CAST(0 AS BIGINT)                                AS is_search_click
+            ,CAST(0 AS BIGINT)                                AS is_search_conversion
+            ,CAST(1 AS BIGINT)                                AS is_chajia_click
+    FROM    raw
+    WHERE   event = 'chajia_click'
+    GROUP BY event_unix_time
+             ,item_id
+             ,mmb_id
+)
+
+-- ----------------------------------------------------------------------
+-- 请求池：用于给比价样本回填最近一次 request_id/scene（同 user，时间不晚于比价）
+-- ----------------------------------------------------------------------
+, request_pool AS
+(
+    SELECT  DISTINCT
+            mmb_id
+            ,request_id
+            ,event_unix_time
+            ,scene
+    FROM    raw
+    WHERE   event IN ('exposure', 'search_exposure')
+    AND     request_id IS NOT NULL
+)
+
+-- ----------------------------------------------------------------------
+-- 推荐分支：套用窗口采样，仅保留用户时间线上邻接点击的样本
+-- ----------------------------------------------------------------------
+, rec_filtered AS
+(
+    SELECT  event_unix_time
+            ,item_id
+            ,mmb_id
+            ,request_id
+            ,scene
+            ,page
+            ,day_h
+            ,week_day
+            ,is_click
+            ,is_conversion
+            ,is_favorite
+            ,is_like
+            ,is_search_exposure
+            ,is_search_click
+            ,is_search_conversion
+            ,is_chajia_click
+            ,SUM(is_click) OVER (PARTITION BY mmb_id ORDER BY event_unix_time ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS click_cnt
+            ,SUM(is_click) OVER (PARTITION BY mmb_id)                                                                 AS click_num
+    FROM    rec_sample
+    WHERE   is_exposure > 0
+    AND     is_click >= is_conversion
+)
+
+-- ----------------------------------------------------------------------
+-- 搜索分支：只保留 (user, item) 维度上出现过 search_click 的相关样本
+-- ----------------------------------------------------------------------
+, search_clicked_pair AS
+(
+    SELECT  DISTINCT
+            mmb_id
+            ,request_id
+    FROM    search_sample
+    WHERE   is_search_click > 0
+)
+, search_filtered AS
+(
+    SELECT  s.event_unix_time
+            ,s.item_id
+            ,s.mmb_id
+            ,s.request_id
+            ,s.scene
+            ,s.page
+            ,s.day_h
+            ,s.week_day
+            ,s.is_click
+            ,s.is_conversion
+            ,s.is_favorite
+            ,s.is_like
+            ,s.is_search_exposure
+            ,s.is_search_click
+            ,s.is_search_conversion
+            ,s.is_chajia_click
+    FROM    search_sample s
+    INNER JOIN search_clicked_pair p
+        ON  s.mmb_id  = p.mmb_id
+        AND s.request_id = p.request_id
+)
+
+-- ----------------------------------------------------------------------
+-- 比价分支：关联同 user 最近一次（时间不晚于比价）的 request_id/scene
+-- ----------------------------------------------------------------------
+, chajia_req_join AS
+(
+    SELECT  c.event_unix_time  AS event_unix_time
+            ,c.item_id         AS item_id
+            ,c.mmb_id          AS mmb_id
+            ,r.request_id      AS request_id
+            ,c.scene           AS scene
+            ,c.page            AS page
+            ,c.day_h           AS day_h
+            ,c.week_day        AS week_day
+            ,ROW_NUMBER() OVER (PARTITION BY c.mmb_id, c.item_id, c.event_unix_time
+                                ORDER BY r.event_unix_time DESC) AS rn
+    FROM    chajia_sample c
+    LEFT JOIN request_pool r
+        ON  r.mmb_id = c.mmb_id
+        AND r.event_unix_time <= c.event_unix_time
+)
+, chajia_filtered AS
+(
+    SELECT  event_unix_time
+            ,item_id
+            ,mmb_id
+            ,request_id
+            ,scene
+            ,page
+            ,day_h
+            ,week_day
+            ,CAST(0 AS BIGINT) AS is_click
+            ,CAST(0 AS BIGINT) AS is_conversion
+            ,CAST(0 AS BIGINT) AS is_favorite
+            ,CAST(0 AS BIGINT) AS is_like
+            ,CAST(0 AS BIGINT) AS is_search_exposure
+            ,CAST(0 AS BIGINT) AS is_search_click
+            ,CAST(0 AS BIGINT) AS is_search_conversion
+            ,CAST(1 AS BIGINT) AS is_chajia_click
+    FROM    chajia_req_join
+    WHERE   rn = 1
+)
+
+-- ----------------------------------------------------------------------
+-- 合并三支写入目标表
+-- ----------------------------------------------------------------------
+INSERT OVERWRITE TABLE home_flow_2606_ctrcvr_sorter_label_table_v2 PARTITION (dt = '${bdp.system.bizdate}')
+SELECT  event_unix_time
+        ,item_id          AS __item_id__
+        ,item_id
+        ,scene
+        ,mmb_id           AS __mmb_id__
+        ,mmb_id
+        ,request_id
+        ,page
+        ,day_h
+        ,week_day
+        ,is_click
+        ,is_conversion
+        ,is_favorite
+        ,is_like
+        ,is_search_exposure
+        ,is_search_click
+        ,is_search_conversion
+        ,is_chajia_click
+FROM
+(
+    SELECT  event_unix_time, item_id, mmb_id, request_id, scene, page, day_h, week_day
+            ,is_click, is_conversion, is_favorite, is_like
+            ,is_search_exposure, is_search_click, is_search_conversion, is_chajia_click
+    FROM    rec_filtered
+    WHERE   click_cnt > 0
+    AND     click_num < 100
+
+    UNION ALL
+
+    SELECT  event_unix_time, item_id, mmb_id, request_id, scene, page, day_h, week_day
+            ,is_click, is_conversion, is_favorite, is_like
+            ,is_search_exposure, is_search_click, is_search_conversion, is_chajia_click
+    FROM    search_filtered
+
+    UNION ALL
+
+    SELECT  event_unix_time, item_id, mmb_id, request_id, scene, page, day_h, week_day
+            ,is_click, is_conversion, is_favorite, is_like
+            ,is_search_exposure, is_search_click, is_search_conversion, is_chajia_click
+    FROM    chajia_filtered
+) t
+;

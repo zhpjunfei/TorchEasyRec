@@ -1,4 +1,26 @@
-# AGENTS.md — Agnes-2.0-Flash 工作规则
+# Codebase Knowledge Graph (codebase-memory-mcp)
+
+THIS PROJECT USES codebase-memory-mcp AND codegraph FOR STRUCTURED CODE CONTEXT.
+ALWAYS PREFER MCP GRAPH TOOLS (search_graph, trace_path, get_code_snippet)
+OVER GLOB/GREP/FILE-SEARCH FOR CODE DISCOVERY.
+
+## Priority Order
+
+1. `search_graph` — find functions, classes, routes, variables by pattern
+1. `trace_path` — trace who calls a function or what it calls
+1. `get_code_snippet` — read specific function/class source code
+1. `query_graph` — run Cypher queries for complex patterns
+1. `get_architecture` — high-level project summary
+
+## When to FALL BACK to grep/glob
+
+- Searching for string literals, error messages, config values
+- Searching non-code files (Dockerfiles, shell scripts, configs)
+- When MCP tools return insufficient results
+
+<!-- codebase-memory-mcp:start -->
+
+# AGENTS.md 工作规则
 
 **请务必使用中文回复**
 
@@ -66,12 +88,12 @@
 ### 11. 遵循代码库的约定，即使你不认同
 
 - 在代码库内，遵循规范 > 个人品味。
-- 如果你真的认为某个约定有害，提出来。不要静默分叉。
+- 如果你认为某个约定有害，提出来。不要静默分叉。
 
 ### 12. 响亮地失败
 
 - 如果任何内容被静默跳过，"已完成"就是错误的。
-- 如果有任何测试被跳过，"测试通过"就是错误的。
+- 有任何测试被跳过，"测试通过"就是错误的。
 - 默认暴露不确定性，而非隐藏它。
 
 ______________________________________________________________________
@@ -87,3 +109,5 @@ ______________________________________________________________________
 - 每次在 `loss()` 或 `forward()` 中引入涉及 tensor 运算+控制流的代码时，第一时间考虑 FX tracing 兼容性
 - 不要只 guard `torch.tensor()` 那一行——整个计算链都需要被保护
 - `is_fx_tracing()` 检查应该包裹**整个**可能产生 Proxy 的代码块
+
+<!-- codebase-memory-mcp:end -->

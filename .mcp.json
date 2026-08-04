@@ -4,6 +4,13 @@
       "type": "stdio",
       "command": "codegraph",
       "args": ["serve", "--mcp"]
+    },
+    "codebase-memory-mcp": {
+      "command": "codebase-memory-mcp",
+      "args": [],
+      "environment": {
+        "CBM_CACHE_DIR": ".codebase-memory/cache"
+      }
     }
   }
 }

@@ -85,7 +85,8 @@ def collect_logits_and_labels(model, dataloader, device):
                 logits_key = f"logits_{tn}"
                 if logits_key not in output:
                     logger.warning(
-                        f"No logits for tower '{tn}' in output keys: {list(output.keys())}"
+                        f"No logits for tower '{tn}' "
+                        f"in output keys: {list(output.keys())}"
                     )
                     continue
 
@@ -119,7 +120,9 @@ def collect_logits_and_labels(model, dataloader, device):
                     lab = batch.labels[label_key].float()
                 else:
                     logger.warning(
-                        f"Label '{label_key}' not found in batch.labels. Available: {list(batch.labels.keys())}"
+                        f"Label '{label_key}' not found "
+                        f"in batch.labels. Available: "
+                        f"{list(batch.labels.keys())}"
                     )
                     lab = torch.zeros_like(lgt)
 
@@ -162,6 +165,21 @@ def fit_and_update_model(model, calibration_data, device="cpu"):
         logger.info(
             "拟合塔 '%s': logits=%s, labels=%s", tower_name, logits.shape, labels.shape
         )
+        with torch.no_grad():
+            lgt_sorted = logits.sort().values
+            logger.info(
+                "  logit 分布: min=%+.4f, p1=%+.4f, p10=%+.4f, p50=%+.4f, "
+                "p90=%+.4f, p99=%+.4f, max=%+.4f, mean=%+.4f, std=%.4f",
+                lgt_sorted[0].item(),
+                lgt_sorted[int(len(lgt_sorted) * 0.01)].item(),
+                lgt_sorted[int(len(lgt_sorted) * 0.10)].item(),
+                lgt_sorted[int(len(lgt_sorted) * 0.50)].item(),
+                lgt_sorted[int(len(lgt_sorted) * 0.90)].item(),
+                lgt_sorted[int(len(lgt_sorted) * 0.99)].item(),
+                lgt_sorted[-1].item(),
+                logits.mean().item(),
+                logits.std().item(),
+            )
         result = ps.fit_from_logits(logits, labels)
 
         # 冻结后写入原 scaler 的 buffer
@@ -242,7 +260,7 @@ def main() -> None:
     from tzrec.datasets.dataset import create_dataloader
     from tzrec.main import _create_features, _create_model
     from tzrec.utils import config_util
-    from tzrec.utils.checkpoint_util import latest_checkpoint, restore_model
+    from tzrec.utils.checkpoint_util import latest_checkpoint
     from tzrec.utils.dist_util import init_process_group
 
     # Initialize distributed if running under torchrun
@@ -314,125 +332,90 @@ def main() -> None:
         pre_sample = {k: v.shape for k, v in list(model.state_dict().items())[:3]}
         logger.info("Pre-restore sample keys: %s", pre_sample)
 
-        try:
-            # ===== 优先从 full_state_dict.pt 加载，规避 DCP 格式不兼容问题 =====
-            # full_state_dict 保存于 ckpt_dir（根目录）而非 checkpoint subdirectory
-            full_sd_path = os.path.join(ckpt_dir, "full_state_dict.pt")
-            if os.path.exists(full_sd_path):
-                logger.info(
-                    f"Loading calibration model from full_state_dict: {full_sd_path}"
-                )
-                state_dict = torch.load(
-                    full_sd_path, map_location=device, weights_only=False
-                )
+        # DCP bridge: load multi-GPU DCP checkpoint on single GPU.
+        # Step 1: read checkpoint metadata to determine actual key format
+        from torch.distributed.checkpoint import FileSystemReader
+        from torch.distributed.checkpoint import load as dcp_load
 
-                # Strip "model." prefix from saved state_dict keys.
-                # Saved state_dict (from DistributedModelParallel) has "model." prefix,
-                # but bare model expects keys without prefix.
-                state_dict_mapped = {}
-                for k, v in state_dict.items():
-                    new_k = k[6:] if k.startswith("model.") else k
-                    state_dict_mapped[new_k] = v
+        from tzrec.utils.checkpoint_util import PartialLoadPlanner
 
-                ka_msg = (
-                    f"\x1b[93m[KEY PREFIX ANALYSIS] Total keys after mapping:"
-                    f" {len(state_dict_mapped)}\x1b[0m"
-                )
-                print(ka_msg)
-                # ===================================
+        model_ckpt_path = os.path.join(ckpt_path, "model")
+        logger.info("DCP bridge: loading from %s", model_ckpt_path)
 
-                # Load via model_target (matches training's model._model pattern)
-                model_target = model._model if hasattr(model, "_model") else model
-                load_result = model_target.load_state_dict(
-                    state_dict_mapped, strict=False
-                )
-                if load_result.missing_keys:
-                    logger.warning("Missing keys: %s", load_result.missing_keys)
-                if load_result.unexpected_keys:
-                    logger.warning("Unexpected keys: %s", load_result.unexpected_keys)
+        ckpt_metadata = FileSystemReader(model_ckpt_path).read_metadata()
+        ckpt_keys = set(ckpt_metadata.state_dict_metadata.keys())
+        logger.info("Checkpoint metadata: %d keys total", len(ckpt_keys))
 
-                # Verify no NaN after load
-                nan_count = sum(
-                    1
-                    for _, p in model_target.named_parameters()
-                    if torch.isnan(p).any()
-                )
-                total_params = sum(1 for _ in model_target.named_parameters())
-                lv_msg = (
-                    f"\x1b[91m[LOAD VERIFICATION] {nan_count}/{total_params}"
-                    f" parameters are NaN\x1b[0m"
-                )
-                print(lv_msg)
-                if nan_count > 0:
-                    err_msg = (
-                        f"\x1b[91mLOAD FAILED:\x1b[0m"
-                        f" {nan_count}/{total_params} params are NaN!"
-                    )
-                    raise RuntimeError(err_msg)
+        logger.info("Sample checkpoint keys (first 5):")
+        for i, k in enumerate(sorted(ckpt_keys)[:5]):
+            logger.info("  CKPT[%d] %s", i, k)
+        logger.info("Sample checkpoint keys (last 5):")
+        all_ckpt_sorted = sorted(ckpt_keys)
+        for i, k in enumerate(all_ckpt_sorted[-5:]):
+            logger.info("  CKPT[-%d] %s", 5 - i, k)
+
+        # Step 2: for each bare model key, find matching checkpoint key
+        bare_sd_template = model.state_dict()
+        bridge_sd = {}
+        ckpt_to_bare = {}  # checkpoint_key -> bare_key
+        bare_to_ckpt = {}  # bare_key -> checkpoint_key
+
+        for bare_key, template_tensor in bare_sd_template.items():
+            for ckpt_key in (
+                bare_key,
+                f"model.{bare_key}",
+                f"_dmp_wrapped_module.module.{bare_key}",
+                f"_dmp_wrapped_module.module.model.{bare_key}",
+                f"_dmp_wrapped_module.{bare_key}",
+                f"module.{bare_key}",
+            ):
+                if ckpt_key in ckpt_keys:
+                    bridge_sd[ckpt_key] = torch.zeros_like(template_tensor)
+                    ckpt_to_bare[ckpt_key] = bare_key
+                    bare_to_ckpt[bare_key] = ckpt_key
+                    break
             else:
                 logger.warning(
-                    "full_state_dict not found, attempting DCP restore "
-                    "(may fail on multi-GPU checkpoints)"
+                    "No checkpoint key matched for bare param [%s]", bare_key
                 )
-                restore_model(ckpt_path, model)
-            # ===============================================================
 
-            # DIAGNOSTIC: Check if weights were actually loaded
-            post_sample = {
-                k: (
-                    v.shape,
-                    float(v.mean()) if v.numel() > 0 else "empty",
-                    bool(torch.isnan(v).any()),
-                )
-                for k, v in list(model.state_dict().items())[:3]
-            }
-            logger.info("Post-restore sample: %s", post_sample)
-            nan_count = sum(
-                1
-                for v in model.state_dict().values()
-                if hasattr(v, "numel") and v.numel() > 0 and torch.isnan(v).any()
-            )
-            logger.info(
-                "Tensors with NaN after restore: %d / %d",
-                nan_count,
-                len(model.state_dict()),
-            )
+        logger.info(
+            "Bridge: matched %d / %d bare params to checkpoint keys",
+            len(bare_to_ckpt),
+            len(bare_sd_template),
+        )
 
-        except (AssertionError, RuntimeError) as e:
-            # DCP checkpoint with MC embedding sharding may fail when:
-            # - Single-GPU: shard range check fails (segments tensor is all INT64_MAX)
-            # - Multi-GPU: meta tensor .item() called in validate_state()
-            # Both cases are caused by MC module's _load_state_dict_post_hook calling
-            # validate_state() which doesn't handle the current sharding context.
-            #
-            # Fix: monkey-patch validate_state to pass, then retry restore_model.
-            logger.warning(
-                "DCP restore failed (%s), patching validate_state and retrying", e
-            )
+        # Step 3: DCP load into bridge state dict
+        dcp_load(bridge_sd, checkpoint_id=model_ckpt_path, planner=PartialLoadPlanner())
 
-            # Find all MC modules and patch their validate_state
-            mc_modules = []
-            for name, module in model.named_modules():
-                if hasattr(module, "_output_segments_tensor") and hasattr(
-                    module, "validate_state"
-                ):
-                    mc_modules.append((name, module))
+        # Step 4: build bare_sd from bridge, then use model.load_state_dict()
+        # (AutoDisEmbedding custom _load_from_state_dict handles per-feature slices)
+        bare_sd = {}
+        for ckpt_key, loaded_tensor in bridge_sd.items():
+            bare_key = ckpt_to_bare[ckpt_key]
+            bare_sd[bare_key] = loaded_tensor
 
-            original_validate_states = {}
+        mc_modules = []
+        for name, module in model.named_modules():
+            if hasattr(module, "_output_segments_tensor") and hasattr(
+                module, "validate_state"
+            ):
+                mc_modules.append((name, module))
+        original_validate_states = {}
+        for mod_name, mod in mc_modules:
+            original_validate_states[mod_name] = mod.validate_state
+            mod.validate_state = lambda *args, **kwargs: None
+
+        try:
+            load_result = model.load_state_dict(bare_sd, strict=False)
+            if load_result.missing_keys:
+                logger.warning("Missing keys: %d", len(load_result.missing_keys))
+            if load_result.unexpected_keys:
+                logger.warning("Unexpected keys: %d", len(load_result.unexpected_keys))
+        finally:
             for mod_name, mod in mc_modules:
-                original_validate_states[mod_name] = mod.validate_state
-                mod.validate_state = lambda *args, **kwargs: None  # no-op
-                logger.info(f"Patched validate_state on {mod_name}")
-
-            try:
-                restore_model(ckpt_path, model)
-                logger.info("Restored successfully with patched validate_state.")
-            finally:
-                # Restore original validate_state methods
-                for mod_name, mod in mc_modules:
-                    if mod_name in original_validate_states:
-                        mod.validate_state = original_validate_states[mod_name]
-                        logger.info(f"Restored validate_state on {mod_name}")
+                if mod_name in original_validate_states:
+                    mod.validate_state = original_validate_states[mod_name]
 
         # DIAGNOSTIC: Check if checkpoint weights were loaded correctly
         logger.info("=" * 60)
@@ -458,35 +441,60 @@ def main() -> None:
         logger.info(f"Total parameter tensors: {total_params}")
         if meta_count > 0:
             logger.warning(
-                f"  {meta_count} tensors are on META device — checkpoint may not be loaded yet"
+                f"  {meta_count} tensors are on META "
+                f"device — checkpoint may not be loaded yet"
             )
-        logger.info(
-            f"NaN elements: {nan_params} across "
-            f"{sum(1 for _n, p in model.named_parameters() if p.device.type != 'meta' and torch.isnan(p).any())} tensors"
-        )
+        nan_tensors = [
+            (n, p)
+            for n, p in model.named_parameters()
+            if p.device.type != "meta" and torch.isnan(p).any()
+        ]
+        logger.info(f"NaN elements: {nan_params} across {len(nan_tensors)} tensors")
+        for n, p in nan_tensors:
+            logger.info(
+                "  NaN PARAM: %s  shape=%s  num_nan=%d",
+                n,
+                p.shape,
+                int(torch.isnan(p).sum().item()),
+            )
+
+        # Also check buffers for NaN (norm buffers like running_mean/var)
+        nan_bufs = [
+            (n, b)
+            for n, b in model.named_buffers()
+            if b.device.type != "meta" and torch.isnan(b).any()
+        ]
+        for n, b in nan_bufs:
+            logger.info(
+                "  NaN BUFFER: %s  shape=%s  num_nan=%d",
+                n,
+                b.shape,
+                int(torch.isnan(b).sum().item()),
+            )
+
         logger.info(f"Near-zero tensors (abs max < 1e-7): {zero_params}")
 
-        # Check a few key parameters (skip meta and empty)
+        # Log a few sample loaded tensors (prioritize NaN ones)
+        nan_logged = set()
         checked = 0
         for name, param in model.named_parameters():
             if param.device.type == "meta":
                 continue
-            if param.numel() == 0:
-                logger.info(
-                    f"  {name}: shape={param.shape}, device={param.device}, EMPTY(tensor)"
-                )
-                checked += 1
+            if name in nan_logged:
                 continue
+            if torch.isnan(param).any():
+                nan_logged.add(name)
+            p_min = param.min().item() if param.numel() > 0 else 0.0
+            p_max = param.max().item() if param.numel() > 0 else 0.0
+            p_mean = param.mean().item() if param.numel() > 0 else 0.0
             logger.info(
                 f"  {name}: shape={param.shape}, device={param.device}, "
-                f"min={param.min().item():.6f}, max={param.max().item():.6f}, "
-                f"mean={param.mean().item():.6f}, has_nan={torch.isnan(param).any().item()}"
+                f"min={p_min:.6f}, max={p_max:.6f}, mean={p_mean:.6f}, "
+                f"has_nan={torch.isnan(param).any().item()}"
             )
             checked += 1
-            if checked >= 5:
+            if checked >= 10:
                 break
-        if checked == 0:
-            logger.warning("  No non-meta parameters found to inspect")
 
         # Run a quick forward test on a single batch to verify no NaN outputs
         logger.info("Running single-batch forward test...")
@@ -502,7 +510,8 @@ def main() -> None:
                     logger.info(
                         f"  {k}: shape={v.shape}, device={v.device}, "
                         f"min={v.min().item():.6f}, max={v.max().item():.6f}, "
-                        f"has_nan={torch.isnan(v).any().item()}, has_inf={torch.isinf(v).any().item()}"
+                        f"has_nan={torch.isnan(v).any().item()}, "
+                        f"has_inf={torch.isinf(v).any().item()}"
                     )
                 else:
                     logger.info(f"  {k}: type={type(v).__name__}, value={v}")
@@ -539,7 +548,8 @@ def main() -> None:
                     else 0
                 )
                 logger.info(
-                    f"Rank 0 collected {total} total samples across {len(cal_data)} towers"
+                    f"Rank 0 collected {total} total samples "
+                    f"across {len(cal_data)} towers"
                 )
 
         for tn, d in cal_data.items():

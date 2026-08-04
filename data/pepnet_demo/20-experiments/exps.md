@@ -70,7 +70,7 @@ Config: expert_normalization: true, ReLU → Swish (4处), GroupNorm(num_groups=
 
 **核心结论：** Phase 1 在 AFP baseline 上只提升了 +0.05pp (CTR/CVR)，此量级处于噪声范围。loss 差异极小 (−0.01%)，entropy_reg 反而降低，说明 Swish 对 expert 的 partition 没有实质性改善。
 
-**决策：** Phase 1 (Swish+GroupNorm) 在 AFP 推全后不再单独评估——AFP 本身已经通过特征分区解决了专家分化问题。继续跑多 epoch 验证边际收益的意义不大。回退到 ReLU 以简化配置。
+**决策（已更新）：** Phase 1 (Swish+GroupNorm) 在 AFP 推全后不再单独评估——AFP 本身已经通过特征分区解决了专家分化问题。**虽然离线 ΔAUC 仅在噪声区间，但后续线上 AB 中 exp2(phase1) Swish+专家 norm 全面正向（PV_CTR +1.8%、UV_CVR +1.58% 均显著），已作为 V17 baseline 推全，未回退 ReLU。**
 
 ## 2026-07-23 | 实验 3: APPNet-AFP Shared (feature_wise) — 线上推全
 
@@ -117,11 +117,13 @@ Config: home_flow_2604_v15_afp_taskwise.config (per-task AFP, feature_wise, hidd
 
 **决策：不推全 task_wise。** 0.6pp UV_CVR 损失无法被折扣下单率的弱信号补偿。
 
-## 2026-07-28 | 实验 6: Home Phase 1 → V17 Baseline（expert_normalization 保留，ReLU）— 线上推全
+## 2026-07-28 | 实验 6: Home Phase 1 → V17 Baseline（expert_normalization + Swish）— 线上推全
 
 **Recommendation: ✅ 已推全，SOTA 当前生产配置**
 
 Config: home_flow_2604_v17_baseline.config = expert_normalization: true + Swish（v15_afp 基线升级）
+
+**实际推全策略：exp2 (Phase 1) = Swish + expert_normalization**
 
 | 指标类型     | 变化幅度 | 显著性 |
 | :----------- | :------- | :----- |
@@ -134,7 +136,7 @@ Config: home_flow_2604_v17_baseline.config = expert_normalization: true + Swish�
 | 曝光留存     | +1.48%   | ✓ 显著 |
 | 点击留存     | +1.72%   | ✓ 显著 |
 
-核心策略：在 AFP shared feature_wise（v15_afp）基础上 **开启 expert_normalization**，激活函数保持 ReLU（Swish 增益 < 噪声），形成 v17 baseline。All metric 线上全面正向，正式推全。
+核心策略：在 AFP shared feature_wise（v15_afp）基础上 **开启 expert_normalization + PLE Swish 激活**（exp2/Phase 1 组合），形成 v17 baseline。All metric 线上全面正向，正式推全。
 
 **决策：v17 baseline 为当前生产最优配置**，进入下一轮实验（GradClip + PCGrad Approx 组合）。
 
@@ -161,6 +163,11 @@ ______________________________________________________________________
 
 - [x] HoME Phase 1 Swish+Norm — 线上确认为 v17 baseline，expert_normalization: true + Swish 正式投产
 - [ ] GradClip + PCGrad Approx 组合探索
+- [x] 温度校准 (CaliCausalRank) — offline CTCVR +15.4%，线上打分崩塌 2 个数量级（TemperatureScaler shift 失控），方向关闭
+- [x] ots (out_task_space_weight) — 线上效果不如 ots=0，方向已放弃
+- [x] chajia_click_seq 序列扩展 — 线上效果微幅
+- [x] KV 特征剪枝 (VariationalDropout cluster top-2) — 容量非瓶颈，不能提升 UV 指标
+- [ ] 延迟反馈修正 (Delayed Feedback) — 数据侧改动，唯一有空间的方向
 
 *注: bit_wise AFP、per-task AFP、gradient balancing (MultiBalance/GradCraft/FDN) 经数据分析均已否决，理由见下方。*
 
@@ -182,4 +189,95 @@ Shared AFP feature_wise 是全维度赢家（CTR/CVR/长期指标全部正向）
 
 ______________________________________________________________________
 
-\*最后更新: 2026-07-28
+______________________________________________________________________
+
+## 2026-08-01 | 实验 7: V17 优化方向汇总与关闭
+
+### 7.1 温度校准 (CaliCausalRank) — ❌ 关闭
+
+**Config:** home_flow_2604_v17_calibration_d_fusion.config (T=1.5 + progressive ECE + cvr_only)
+
+| 指标             | Baseline | Calib D | Δ          |
+| ---------------- | -------- | ------- | ---------- |
+| AUC_ctr          | 0.70792  | 0.70568 | **-0.32%** |
+| AUC_cvr          | 0.75470  | 0.75977 | +0.67%     |
+| BCE_ctcvr        | 0.31719  | 0.36618 | **+15.4%** |
+| calibration_loss | —        | 0.12009 | bug 已修复 |
+
+**线上事故：** 上线后打分下降 2 个数量级。根因：TemperatureScaler 的 `shift` 参数无上限 clamp，ECE loss 驱动 T 从 1.5 漂移失控，推理时 pCVR 方差塌缩 → CVR 塔失声 → 排序退化为 CTR 单目标。
+
+**决策：** 关闭温度校准方向。卸载相关代码和 config。
+
+### 7.2 ots (out_task_space_weight) — ❌ 放弃
+
+线上 AB 效果不如 ots=0（ESMM），方向已放弃。
+
+### 7.3 chajia_click_seq 序列扩展 — ⚠️ 微幅
+
+线上效果微幅，不足以作为独立优化方向。
+
+### 7.4 KV 特征剪枝 (VariationalDropout cluster top-2) — ⚠️ 不可行
+
+基于 `home_flow_2604_v17_chajia_click_seq_importance.config` 的 VariationalDropout 特征重要性（`mean_drop_p` = dropout 概率，高=冗余）。按基础特征簇保留 top-2 最低 p 窗口，KV 特征 438 → 189（-57%）。
+
+**Config:** home_flow_2604_v17_feature_prune.config
+
+**结论：** 多轮实验已证模型容量不是瓶颈（PLE 扩容/塔加深/DCNv2/CDOT 全部证否）。特征剪枝只能持平或下降，不能提升 UV 指标。config 保留用于验证递补假设，但不应作为效果提升方向。
+
+### 7.5 减法方向共识
+
+优化 UV CTR/UV CVR 不能靠做减法（模型容量不瓶颈），也不能靠做加法（所有加法方向已证否）。当前架构和特征集合已接近天花板。
+
+### 7.6 唯一有空间的方向：延迟反馈修正
+
+**理论：** CVR 标签存在延迟（用户点击后 1-7 天才转化），训练时近期"未转化"样本中 5-15% 实际为正样本。模型学到的是"即时转化"而非"最终转化"，系统性低估 CVR。
+
+**业界证据：** Criteo DFM (KDD 2019) CVR AUC +2-3%；阿里 ESDF 线上 GMV +3-5%。
+
+**实现：** 数据管道改动（近期负样本不参与 CVR 训练或权重衰减），无需改模型/架构/config。
+
+______________________________________________________________________
+
+\*最后更新: 2026-08-01
+
+### 7.7 辅助任务实验 — pending
+
+**问题：** chajia_click_seq 序列扩展线上微幅，可能因为序列特征缺乏配套 label 的直接监督。
+
+**新样本：** 2606 样本新增 5 个 label：is_favorite、is_like、is_search_click、is_search_conversion、is_chajia_click。
+
+**标签语义澄清：**
+
+- is_favorite / is_like：点击进入详情页后产生，在点击后空间定义，保留 task_space=is_click
+- is_chajia_click：跨场景行为（查价场景），与 is_click 无嵌套关系，不加 task_space
+
+**Config:** home_flow_2604_v17_aux_tasks.config
+
+| 任务         | label           | weight | task_space | 对应序列                | tower MLP     |
+| ------------ | --------------- | ------ | ---------- | ----------------------- | ------------- |
+| ctr          | is_click        | 4.5    | —          | click_10/50_seq         | [512,256,128] |
+| cvr          | is_conversion   | 1.0    | is_click   | conversion_5/20_seq     | [512,256,128] |
+| favorite     | is_favorite     | 0.1    | is_click   | favorite_5/10_seq       | [256,128]     |
+| like         | is_like         | 0.1    | is_click   | like_100/10_seq         | [256,128]     |
+| chajia_click | is_chajia_click | 0.1    | — (全样本) | chajia_click_100/10_seq | [256,128]     |
+
+PLE 从 2 任务→5 任务，gate 从 4 维→7 维 softmax。辅助 tower 用 [256,128] 小塔 + dropout 0.2 防过拟合。
+
+**Loss 融合审查：**
+
+- 初版 weight=0.3 批评性审查发现辅助任务 loss 贡献 21% 太高（走 v12 翻车路径），降为 0.1
+- chajia_click 去掉 task_space_indicator（跨场景行为，不在点击空间内）
+- favorite/like 保留 task_space=is_click（点击后行为）
+
+**样本监控：** 训练循环中每个 log_step 输出 `[LABEL_DIST]` 日志 + TensorBoard `label_pos_rate/{name}` 标量。
+
+**待验证：**
+
+1. label 分布日志确认新 label 数据正常加载
+1. 辅助任务 AUC 是否有效学习（favorite/like/chajia_click AUC > 0.5）
+1. 主任务 AUC_ctr / AUC_cvr 是否回退（þv12 教训）
+1. PLE gate entropy 是否退化（5 任务 gate 是否 collapse）
+
+______________________________________________________________________
+
+\*最后更新: 2026-08-02

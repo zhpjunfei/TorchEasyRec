@@ -237,12 +237,15 @@ class PlattScaler(nn.Module):
             self.b = nn.Parameter(torch.tensor(0.0))
 
     def forward(self, logits: torch.Tensor) -> torch.Tensor:
-        """对 logits 做 Platt 校准。"""
+        """对 logits 做 Platt 校准（输出 logit-scale）。
+
+        注意：不应用 sigmoid，由 caller 负责 sigmoid。这样与
+        _output_to_prediction_impl 中的 sigmoid 不会形成 double sigmoid。
+        """
         if hasattr(self, "a"):
-            return torch.sigmoid(self.a * logits + self.b)
+            return self.a * logits + self.b
         else:
-            # frozen: apply sigmoid(a*logit + b) with frozen buffers
-            return torch.sigmoid(self._a * logits + self._b)
+            return self._a * logits + self._b
 
     def get_a(self) -> float:
         """Return fitted or default a parameter."""

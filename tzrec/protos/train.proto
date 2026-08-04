@@ -70,6 +70,4 @@ message TrainConfig {
     optional uint32 gradient_accumulation_steps = 18;
     // dense gradient clipping config
     optional GradClipping grad_clipping = 19;
-    // Whether to save full non-sharded state_dict for calibration tasks (e.g., platt calibration)
-    optional bool save_full_state_dict = 20;
 }
