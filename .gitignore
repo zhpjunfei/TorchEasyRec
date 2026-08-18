@@ -68,3 +68,5 @@ data/pepnet_demo/resources/pairecHomeByHuoshanV4_多维度统计2.xlsx
 # Node modules
 node_modules/
 skills-deps/
+
+.reasonix/*
