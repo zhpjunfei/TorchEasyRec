@@ -1,0 +1,187 @@
+set odps.sql.type.system.odps2=true;
+CREATE TABLE IF NOT EXISTS home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_wide_v1
+(
+    event_unix_time bigint
+    ,event string
+    ,event_value double
+    ,item_id string
+    ,scene string
+    ,mmb_id string
+    ,request_id string
+    ,page string
+    ,day_h bigint COMMENT 'event_time在当天的第几小时'
+    ,week_day bigint COMMENT 'event_time在一周得第几天'
+    ,type string
+    ,gender string
+    ,age_group string
+    ,reg_type string
+    ,mmb_level string
+    ,user_status string
+    ,mmb_status string
+    ,intergral double
+    ,gold_coin double
+    ,is_subscribe_discount string
+    ,is_subscribe_savemoney string
+    ,is_subscribe_clockin string
+    ,receive_push string
+    ,is_not_disturb string
+    ,is_atpush string
+    ,province string
+    ,city string
+    ,area_code string
+    ,reg_time string
+    ,login_province string
+    ,login_city string
+    ,login_time string
+    ,sdk_version string
+    ,app_version string
+    ,os_type string
+    ,os_version string
+    ,dev_brand string
+    ,dev_model string
+    ,jpush string
+    ,first_campaign_name string
+    ,first_utm_campaign string
+    ,first_utm_source string
+    ,first_ad_name string
+    ,first_site_name string
+    ,install_apps string
+    ,lifecycle_tags string
+    ,item_type string
+    ,cate string
+    ,cate_id_path string
+    ,copyright_end bigint
+    ,create_time bigint
+    ,current_price double
+    ,keyword string
+    ,pub_time bigint
+    ,tags string
+    ,title string
+    ,related_goods_ids string
+    ,brand string
+    ,core_entity string
+    ,dianpufensi string
+    ,dianpupingfen string
+    ,discount_intensity string
+    ,discount_type string
+    ,first_cate_id bigint
+    ,second_cate_id bigint
+    ,third_cate_id bigint
+    ,gender_score bigint
+    ,level string
+    ,modifiers string
+    ,pinpaidengji string
+    ,price_tag string
+    ,promotion_channel string
+    ,publish_user string
+    ,shop_id string
+    ,site string
+    ,spu_id string
+    ,sqk_id string
+    ,sub_title string
+    ,username string
+)
+PARTITIONED BY
+(
+    dt string
+)
+LIFECYCLE 90
+;
+INSERT OVERWRITE TABLE home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_wide_v1 PARTITION(dt='${bdp.system.bizdate}')
+SELECT  sq0.event_unix_time
+        ,sq0.event
+        ,sq0.event_value
+        ,sq0.item_id
+        ,sq0.scene
+        ,sq0.mmb_id
+        ,sq0.request_id
+        ,sq0.page
+        ,sq0.day_h
+        ,sq0.week_day
+        ,sq1.type
+        ,sq1.gender
+        ,sq1.age_group
+        ,sq1.reg_type
+        ,sq1.mmb_level
+        ,sq1.user_status
+        ,sq1.mmb_status
+        ,sq1.intergral
+        ,sq1.gold_coin
+        ,sq1.is_subscribe_discount
+        ,sq1.is_subscribe_savemoney
+        ,sq1.is_subscribe_clockin
+        ,sq1.receive_push
+        ,sq1.is_not_disturb
+        ,sq1.is_atpush
+        ,sq1.province
+        ,sq1.city
+        ,sq1.area_code
+        ,sq1.reg_time
+        ,sq1.login_province
+        ,sq1.login_city
+        ,sq1.login_time
+        ,sq1.sdk_version
+        ,sq1.app_version
+        ,sq1.os_type
+        ,sq1.os_version
+        ,sq1.dev_brand
+        ,sq1.dev_model
+        ,sq1.jpush
+        ,sq1.first_campaign_name
+        ,sq1.first_utm_campaign
+        ,sq1.first_utm_source
+        ,sq1.first_ad_name
+        ,sq1.first_site_name
+        ,sq1.install_apps
+        ,sq1.lifecycle_tags
+        ,sq2.item_type
+        ,sq2.cate
+        ,sq2.cate_id_path
+        ,sq2.copyright_end
+        ,sq2.create_time
+        ,sq2.current_price
+        ,sq2.keyword
+        ,sq2.pub_time
+        ,sq2.tags
+        ,sq2.title
+        ,sq2.related_goods_ids
+        ,sq2.brand
+        ,sq2.core_entity
+        ,sq2.dianpufensi
+        ,sq2.dianpupingfen
+        ,sq2.discount_intensity
+        ,sq2.discount_type
+        ,sq2.first_cate_id
+        ,sq2.second_cate_id
+        ,sq2.third_cate_id
+        ,sq2.gender_score
+        ,sq2.level
+        ,sq2.modifiers
+        ,sq2.pinpaidengji
+        ,sq2.price_tag
+        ,sq2.promotion_channel
+        ,sq2.publish_user
+        ,sq2.shop_id
+        ,sq2.site
+        ,sq2.spu_id
+        ,sq2.sqk_id
+        ,sq2.sub_title
+        ,sq2.username
+FROM    (
+            SELECT  *
+            FROM    home_flow_2604_dwd_log_zhekou_rec_user_bhv_info_preprocess_v1
+            WHERE   dt = '${bdp.system.bizdate}'
+        ) sq0
+LEFT JOIN (
+              SELECT  *
+              FROM    home_flow_2604_ads_usr_user_basic_info_preprocess_v1
+              WHERE   dt = '${bdp.system.bizdate}'
+          ) sq1
+ON      sq0.mmb_id = sq1.mmb_id LEFT
+JOIN    (
+            SELECT  *
+            FROM    home_flow_2604_ads_log_zhekou_rec_item_basic_info_preprocess_v1
+            WHERE   dt = '${bdp.system.bizdate}'
+        ) sq2
+ON      sq0.item_id = sq2.item_id
+;

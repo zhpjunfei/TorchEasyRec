@@ -1,0 +1,46 @@
+set odps.sql.type.system.odps2=true;
+
+
+-- ==========================================
+-- 1. 创建训练集表和验证集表 (仅首次运行需要)
+-- ==========================================
+-- DROP TABLE IF EXISTS home_flow_2606_silent_sorter_config_pyfg_encoded_shuffled_180d;
+-- CREATE TABLE home_flow_2606_silent_sorter_config_pyfg_encoded_shuffled_180d
+-- LIKE home_flow_2606_silent_sorter_config_pyfg_encoded_v2 LIFECYCLE 1;
+-- ALTER TABLE home_flow_2606_silent_sorter_config_pyfg_encoded_shuffled_180d
+-- ADD COLUMNS (
+--   search_weight DOUBLE
+--   ,is_engagement       BIGINT
+--   ,is_home_scene_click       BIGINT  -- is_home_scene AND is_click
+--   ,is_home_scene_conversion    BIGINT  -- is_home_scene AND is_conversion
+--   ,is_search_scene_click   BIGINT  -- is_search_scene AND is_search_click
+-- );
+
+
+
+
+
+-- ==========================================
+-- 2. 每日调度执行：T-1 滑动窗口 + OOT 验证
+-- ==========================================
+FROM home_flow_2606_silent_sorter_config_pyfg_encoded_v2
+
+
+-- 【产出训练集】 (前 180 天)
+INSERT OVERWRITE TABLE home_flow_2606_silent_sorter_config_pyfg_encoded_shuffled_180d PARTITION(dt='${bdp.system.bizdate}')
+SELECT
+`(dt)?+.+`
+,CASE
+  WHEN ARRAY_CONTAINS(f_req_page, 'search_price')
+   AND NOT ARRAY_CONTAINS(f_req_page, '1w_tab_f_index_content')
+   AND NOT ARRAY_CONTAINS(f_req_page, '1zhekoutuijian')
+  THEN 0.3
+  ELSE 1.0
+END AS search_weight
+,CAST(CASE WHEN is_click = 1 OR is_chajia_click = 1 THEN 1 ELSE 0 END AS BIGINT) AS is_engagement
+,CAST(IF(is_home_scene = 1 AND is_click = 1, 1, 0) AS BIGINT) AS is_home_scene_click
+,CAST(IF(is_home_scene = 1 AND is_conversion = 1, 1, 0) AS BIGINT) AS is_home_scene_conversion
+,CAST(IF(is_search_scene = 1 AND is_search_click = 1, 1, 0) AS BIGINT) AS is_search_scene_click
+WHERE   dt > TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'), -180, 'dd'), 'yyyymmdd')
+AND     dt <= '${bdp.system.bizdate}'
+DISTRIBUTE BY CAST(RAND() * 10000 AS BIGINT)

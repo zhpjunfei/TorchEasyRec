@@ -1,0 +1,17 @@
+from pyfg101 import run_on_odps
+fg_task = run_on_odps.FgTask(
+  'feature_mall_home_flow_2606_silent_sorter_v2_training_set',
+  'home_flow_2606_silent_sorter_config_pyfg_encoded_v2',
+  'home_flow_2607_ctrcvr_sorter_config_fg_v2.json',
+  args['bizdate'],
+  force_delete_output_table=False,
+  force_update_resource=False,
+  output_merged_str=False,
+)
+
+# fg_task.add_sql_setting('odps.stage.mapper.mem', 12288)
+# fg_task.add_sql_setting('odps.sql.udf.jvm.memory', 8192)
+# fg_task.add_sql_setting('odps.sql.mapper.instances', 20)
+# fg_task.add_sql_setting('odps.sql.udf.python.memory', 256)
+
+fg_task.run(o)
