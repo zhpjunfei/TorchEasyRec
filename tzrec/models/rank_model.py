@@ -334,7 +334,8 @@ class RankModel(BaseModel):
             )
             group_name_map = self._build_group_name_map(oneof_metric_cfg.grouping_key)
             self._metric_modules[metric_name] = GroupedAUC(
-                group_name_map=group_name_map
+                group_name_map=group_name_map,
+                metric_name=metric_name,
             )
         elif metric_type == "segment_auc":
             assert num_class <= 2, (
@@ -344,6 +345,7 @@ class RankModel(BaseModel):
             self._metric_modules[metric_name] = SegmentAUC(
                 target_group=oneof_metric_cfg.target_group,
                 group_name_map=group_name_map,
+                metric_name=metric_name,
             )
         elif metric_type == "xauc":
             self._metric_modules[metric_name] = XAUC(**metric_kwargs)
@@ -383,6 +385,21 @@ class RankModel(BaseModel):
             )
         elif metric_type == "xauc":
             metric_module = XAUC(**metric_kwargs)
+        elif metric_type == "grouped_auc":
+            assert num_class <= 2, (
+                f"num_class must less than 2 when metric type is {metric_type}"
+            )
+            group_name_map = self._build_group_name_map(oneof_metric_cfg.grouping_key)
+            metric_module = GroupedAUC(group_name_map=group_name_map)
+        elif metric_type == "segment_auc":
+            assert num_class <= 2, (
+                f"num_class must less than 2 when metric type is {metric_type}"
+            )
+            group_name_map = self._build_group_name_map(oneof_metric_cfg.grouping_key)
+            metric_module = SegmentAUC(
+                target_group=oneof_metric_cfg.target_group,
+                group_name_map=group_name_map,
+            )
         else:
             raise ValueError(f"{metric_type} is not supported for this model")
         self._train_metric_modules[metric_name] = TrainMetricWrapper(
@@ -445,10 +462,18 @@ class RankModel(BaseModel):
                 if num_class == 1
                 else predictions["probs1" + suffix]
             )
-            # pyre-ignore [16]
-            grouping_key = base_sparse_feat[
-                oneof_metric_cfg.grouping_key
-            ].to_padded_dense(1)[:, 0]
+            grouping_key_name = oneof_metric_cfg.grouping_key
+            if grouping_key_name in base_sparse_feat:
+                grouping_key = base_sparse_feat[grouping_key_name].to_padded_dense(1)[
+                    :, 0
+                ]
+            elif grouping_key_name in batch.labels:
+                grouping_key = batch.labels[grouping_key_name]
+            else:
+                raise ValueError(
+                    f"Grouping key '{grouping_key_name}' not found in "
+                    f"features or labels"
+                )
             if TARGET_REPEAT_INTERLEAVE_KEY in predictions:
                 grouping_key = grouping_key.repeat_interleave(
                     predictions[TARGET_REPEAT_INTERLEAVE_KEY]
@@ -459,9 +484,18 @@ class RankModel(BaseModel):
             self._metric_modules[metric_name].update(pred, label)
         elif metric_type == "grouped_xauc":
             pred = predictions["y" + suffix]
-            grouping_key = base_sparse_feat[
-                oneof_metric_cfg.grouping_key
-            ].to_padded_dense(1)[:, 0]
+            grouping_key_name = oneof_metric_cfg.grouping_key
+            if grouping_key_name in base_sparse_feat:
+                grouping_key = base_sparse_feat[grouping_key_name].to_padded_dense(1)[
+                    :, 0
+                ]
+            elif grouping_key_name in batch.labels:
+                grouping_key = batch.labels[grouping_key_name]
+            else:
+                raise ValueError(
+                    f"Grouping key '{grouping_key_name}' not found in "
+                    f"features or labels"
+                )
             if TARGET_REPEAT_INTERLEAVE_KEY in predictions:
                 grouping_key = grouping_key.repeat_interleave(
                     predictions[TARGET_REPEAT_INTERLEAVE_KEY]
@@ -484,6 +518,13 @@ class RankModel(BaseModel):
     ) -> None:
         metric_type = metric_cfg.WhichOneof("metric")
         metric_name = metric_type + suffix
+
+        base_sparse_feat = None
+        if metric_type in ("grouped_auc", "segment_auc"):
+            base_sparse_feat = {}
+            for kjt in batch.sparse_features.values():
+                base_sparse_feat.update(kjt.to_dict())
+
         if metric_type == "auc":
             pred = (
                 predictions["probs" + suffix]
@@ -503,6 +544,30 @@ class RankModel(BaseModel):
         elif metric_type == "xauc":
             pred = predictions["y" + suffix]
             self._train_metric_modules[metric_name].update(pred, label)
+        elif metric_type in ("grouped_auc", "segment_auc"):
+            pred = (
+                predictions["probs" + suffix]
+                if num_class == 1
+                else predictions["probs1" + suffix]
+            )
+            oneof_metric_cfg = getattr(metric_cfg, metric_type)
+            grouping_key_name = oneof_metric_cfg.grouping_key
+            if grouping_key_name in base_sparse_feat:
+                grouping_key = base_sparse_feat[grouping_key_name].to_padded_dense(1)[
+                    :, 0
+                ]
+            elif grouping_key_name in batch.labels:
+                grouping_key = batch.labels[grouping_key_name]
+            else:
+                raise ValueError(
+                    f"Grouping key '{grouping_key_name}' not found in "
+                    f"features or labels"
+                )
+            if TARGET_REPEAT_INTERLEAVE_KEY in predictions:
+                grouping_key = grouping_key.repeat_interleave(
+                    predictions[TARGET_REPEAT_INTERLEAVE_KEY]
+                )
+            self._train_metric_modules[metric_name].update(pred, label, grouping_key)
         else:
             raise ValueError(f"{metric_type} is not supported for this model")
 

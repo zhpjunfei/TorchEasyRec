@@ -506,66 +506,107 @@ def _train_and_evaluate(
                         summary_writer=summary_writer,
                         train_metrics=train_metrics,
                     )
-                    # --- Label distribution monitoring ---
-                    if batch is not None and hasattr(batch, "labels"):
-                        label_stats = []
-                        for ln, lt in batch.labels.items():
-                            if lt.dtype in (
-                                torch.float32,
-                                torch.float64,
-                                torch.int32,
-                                torch.int64,
-                            ):
-                                pos = (lt > 0).sum().item()
-                                total = lt.numel()
-                                rate = pos / max(total, 1)
-                                label_stats.append(f"{ln}:{rate:.4f}({pos}/{total})")
-                                if summary_writer is not None:
-                                    summary_writer.add_scalar(
-                                        f"label_pos_rate/{ln}",
-                                        rate,
-                                        i_step,
+                    if is_local_rank_zero:
+                        # --- Label distribution monitoring ---
+                        if batch is not None and hasattr(batch, "labels"):
+                            label_stats = []
+                            for ln, lt in batch.labels.items():
+                                if lt.dtype in (
+                                    torch.float32,
+                                    torch.float64,
+                                    torch.int32,
+                                    torch.int64,
+                                ):
+                                    pos = (lt > 0).sum().item()
+                                    total = lt.numel()
+                                    rate = pos / max(total, 1)
+                                    label_stats.append(
+                                        f"{ln}:{rate:.4f}({pos}/{total})"
                                     )
-                        if label_stats:
-                            logger.info(
-                                "[LABEL_DIST] %s",
-                                " ".join(label_stats),
-                            )
-                    # --- Prediction stats monitoring ---
-                    if predictions is not None:
-                        pred_stats = []
-                        for pk in ["probs_ctr", "probs_cvr"]:
-                            pt = predictions.get(pk)
-                            if pt is not None and pt.dtype in (
-                                torch.float32,
-                                torch.float64,
-                            ):
-                                pm = pt.mean().item()
-                                ps = pt.std().item()
-                                pmin = pt.min().item()
-                                pmax = pt.max().item()
-                                pred_stats.append(
-                                    f"{pk}:mean={pm:.4f},"
-                                    f"std={ps:.4f},"
-                                    f"min={pmin:.4f},"
-                                    f"max={pmax:.4f}"
+                                    if summary_writer is not None:
+                                        summary_writer.add_scalar(
+                                            f"label_pos_rate/{ln}",
+                                            rate,
+                                            i_step,
+                                        )
+                            if label_stats:
+                                logger.info(
+                                    "[LABEL_DIST] %s",
+                                    " ".join(label_stats),
                                 )
-                                if summary_writer is not None:
-                                    summary_writer.add_scalar(
-                                        f"pred/{pk}_mean",
-                                        pm,
-                                        i_step,
+                        # --- Prediction stats monitoring ---
+                        if predictions is not None:
+                            pred_stats = []
+                            for pk in ["probs_ctr", "probs_cvr"]:
+                                pt = predictions.get(pk)
+                                if pt is not None and pt.dtype in (
+                                    torch.float32,
+                                    torch.float64,
+                                ):
+                                    pm = pt.mean().item()
+                                    ps = pt.std().item()
+                                    pmin = pt.min().item()
+                                    pmax = pt.max().item()
+                                    pred_stats.append(
+                                        f"{pk}:mean={pm:.4f},"
+                                        f"std={ps:.4f},"
+                                        f"min={pmin:.4f},"
+                                        f"max={pmax:.4f}"
                                     )
-                                    summary_writer.add_scalar(
-                                        f"pred/{pk}_std",
-                                        ps,
-                                        i_step,
+                                    if summary_writer is not None:
+                                        summary_writer.add_scalar(
+                                            f"pred/{pk}_mean",
+                                            pm,
+                                            i_step,
+                                        )
+                                        summary_writer.add_scalar(
+                                            f"pred/{pk}_std",
+                                            ps,
+                                            i_step,
+                                        )
+                            if pred_stats:
+                                logger.info(
+                                    "[PRED_STATS] %s",
+                                    " ".join(pred_stats),
+                                )
+                        # --- Per-scene prediction stats ---
+                        if (
+                            predictions is not None
+                            and batch is not None
+                            and hasattr(batch, "labels")
+                        ):
+                            scene_masks = {
+                                "home": batch.labels.get("is_home_scene"),
+                                "chajia": batch.labels.get("is_chajia_scene"),
+                                "search": batch.labels.get("is_search_scene"),
+                            }
+                            for pk in ["probs_ctr", "probs_cvr"]:
+                                pt = predictions.get(pk)
+                                if pt is None or pt.dtype not in (
+                                    torch.float32,
+                                    torch.float64,
+                                ):
+                                    continue
+                                scene_stats = []
+                                for scene_name, mask in scene_masks.items():
+                                    if mask is None:
+                                        continue
+                                    m = mask > 0
+                                    cnt = m.sum().item()
+                                    if cnt < 2:
+                                        continue
+                                    scene_pt = pt[m]
+                                    sm = scene_pt.mean().item()
+                                    ss = scene_pt.std().item()
+                                    scene_stats.append(
+                                        f"{scene_name}({cnt}):mean={sm:.4f},std={ss:.4f}"
                                     )
-                        if pred_stats:
-                            logger.info(
-                                "[PRED_STATS] %s",
-                                " ".join(pred_stats),
-                            )
+                                if scene_stats:
+                                    logger.info(
+                                        "[PRED_STATS_%s] %s",
+                                        pk,
+                                        " ".join(scene_stats),
+                                    )
 
                 for lr in lr_scheduler:
                     if not lr.by_epoch:

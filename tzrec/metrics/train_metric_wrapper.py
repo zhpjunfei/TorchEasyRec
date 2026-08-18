@@ -10,6 +10,8 @@
 # limitations under the License.
 
 
+from typing import Any
+
 import torch
 from torch import Tensor, nn
 from torchmetrics import Metric
@@ -39,9 +41,9 @@ class TrainMetricWrapper(nn.Module):
             torch.tensor(0, dtype=torch.int), requires_grad=False
         )
 
-    def update(self, preds: Tensor, target: Tensor) -> None:
+    def update(self, preds: Tensor, target: Tensor, *args: Any) -> None:
         """Update metric module."""
-        self._metric_module.update(preds, target)
+        self._metric_module.update(preds, target, *args)
         self._step_cnt += 1
         if self._step_cnt % self._decay_step == 0:
             if isinstance(self._metric_module, DecayAUC):

@@ -104,6 +104,44 @@ ______________________________________________________________________
 
 - 基线单 Epoch 后已开始过拟合，多 Epoch 无意义
 
+### DECISION: 融合公式优化策略 (2026-08-06)
+
+**背景**：当前线上公式 `score = ctr * (1+cvr)` 导致 CTR 过度优化
+
+**第零阶段 v1**：`ctr^0.3 * cvr^1.7`（指数加权）
+
+- 结果：❌ 严重负向（CTR -38.4%, CVR +1.2%）
+- 原因：指数放大效应过于极端
+
+**第零阶段 v2**：`0.6*ctr + 0.5*cvr`（加法融合）
+
+- 结果：⚠️ PV 维度正向（CTR -11.9%, PV_CVR +16.7%, 净收益 +4.8%）
+- 教训：加法融合远优于指数融合，CTR/CVR 权重比 1.2:1 是合理区间
+
+**第零阶段 v3**：`0.3*ctr + 0.7*cvr`（加法融合）
+
+- 状态：🔄 进行中
+- 预期：进一步提升 CVR 权重（权重比 0.43:1）
+
+**第一阶段**：场景 mask + CVR loss 权重 + 辅助任务
+
+- 状态：✅ 配置文件已完成（v17_scene_mask）
+- 关键改动：CTR/CVR 场景 mask、CVR weight 2.0、chajia/search 辅助任务、lifecycle_tags grouped_auc
+- 基于 chajia_click_seq2，实现 Issue #1 全部需求
+
+**样本管道优化**：
+
+- 状态：✅ 已完成
+- 场景标记：is_home_scene, is_search_scene, is_chajia_scene
+- ~~比价负采样~~ **已废弃**：request_id=NULL 导致 sq56 特征关联失败，回填方案特征表 match_rate=0%。改为只用正样本训练 chajia_click 辅助任务（Issue #4）
+
+**关键经验**：
+
+1. 加法融合远优于指数融合，线性关系更稳定可控
+1. CTR/CVR 权重比是关键：原始 4:1 → v2 的 1.2:1 → v3 的 0.43:1
+1. CVR 权重提升需谨慎，过度强调会牺牲 CTR
+1. ODPS HASH 函数返回负数，必须用 `ABS(HASH())`
+
 ### BUG FIX: FX tracing 期间 Proxy 变量不可用于控制流 (2026-07-18)
 
 - 每次在 `loss()` 或 `forward()` 中引入涉及 tensor 运算+控制流的代码时，第一时间考虑 FX tracing 兼容性

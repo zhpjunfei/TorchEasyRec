@@ -182,9 +182,23 @@ class MultiTaskRank(RankModel):
                     + (1.0 - ctcvr_label)
                     * torch.log((1.0 - ctcvr_probs).clamp(min=1e-7))
                 )
-                losses["binary_cross_entropy_ctcvr"] = (
-                    bce.mean() * self._ctcvr_loss_weight
-                )
+                # Apply task_space mask to CTCVR loss
+                if self._ctcvr_ctr_cfg and self._ctcvr_ctr_cfg.HasField(
+                    "task_space_indicator_label"
+                ):
+                    indicator = self._ctcvr_ctr_cfg.task_space_indicator_label
+                    in_space = (batch.labels[indicator] > 0).float()
+                    ctcvr_weight = (
+                        self._ctcvr_ctr_cfg.in_task_space_weight * in_space
+                        + self._ctcvr_ctr_cfg.out_task_space_weight * (1 - in_space)
+                    )
+                    bce = bce * ctcvr_weight
+                    bce = div_no_nan(bce.sum(), ctcvr_weight.sum())
+                    losses["binary_cross_entropy_ctcvr"] = bce * self._ctcvr_loss_weight
+                else:
+                    losses["binary_cross_entropy_ctcvr"] = (
+                        bce.mean() * self._ctcvr_loss_weight
+                    )
 
         losses.update(self._loss_collection)
         return losses

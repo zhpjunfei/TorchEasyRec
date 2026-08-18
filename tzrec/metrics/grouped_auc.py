@@ -26,7 +26,10 @@ class GroupedAUC(Metric):
     """Grouped AUC."""
 
     def __init__(
-        self, group_name_map: Optional[Dict[int, str]] = None, **kwargs: Any
+        self,
+        group_name_map: Optional[Dict[int, str]] = None,
+        metric_name: str = "",
+        **kwargs: Any,
     ) -> None:
         super().__init__(sync_on_compute=False, **kwargs)
         self.add_state("preds", default=[], dist_reduce_fx=None)
@@ -35,6 +38,7 @@ class GroupedAUC(Metric):
         self._world_size = int(os.environ.get("WORLD_SIZE", 1))
         self._rank = int(os.environ.get("RANK", 0))
         self._group_name_map = group_name_map or {}
+        self._metric_name = metric_name
 
     # pyre-ignore [14]
     def update(
@@ -180,7 +184,8 @@ class GroupedAUC(Metric):
                             all_segments.append((name, s[1], s[2], s[3], gid))
                 all_segments.sort(key=lambda x: x[1])
                 logger.info(
-                    f"All-ranks segments (name, auc, mean_target, samples, group_id): "
+                    f"All-ranks segments [{self._metric_name}] "
+                    f"(name, auc, mean_target, samples, group_id): "
                     f"{all_segments}"
                 )
 

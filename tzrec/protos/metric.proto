@@ -80,6 +80,8 @@ message TrainMetricConfig {
         MeanSquaredError mean_squared_error = 5;
         Accuracy accuracy = 6;
         XAUC xauc = 8;
+        GroupedAUC grouped_auc = 9;
+        SegmentAUC segment_auc = 10;
     }
     // metric decay rate
     optional float decay_rate = 20 [default=0.90];
