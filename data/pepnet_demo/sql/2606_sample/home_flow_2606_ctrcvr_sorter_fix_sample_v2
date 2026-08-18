@@ -1279,6 +1279,11 @@ CREATE TABLE IF NOT EXISTS mmb_sage.feature_mall_home_flow_2606_ctrcvr_sorter_v2
     ,user__kv_item_type_cfr_360d                                     MAP<STRING,FLOAT>
     ,user__kv_spu_id_cfr_360d                                        MAP<STRING,FLOAT>
     ,user__kv_core_entity_cfr_360d                                   MAP<STRING,FLOAT>
+    ,f_req_usertype                                                  STRING
+    ,is_chajia_conversion                                            BIGINT
+    ,is_home_scene                                                   BIGINT
+    ,is_search_scene                                                 BIGINT
+    ,is_chajia_scene                                                 BIGINT
 )
 PARTITIONED BY
 (
@@ -1288,6 +1293,17 @@ STORED AS aliorc
 TBLPROPERTIES ('columnar.nested.type' = 'true')
 LIFECYCLE 90
 ;
+
+
+-- ALTER TABLE feature_mall_home_flow_2606_ctrcvr_sorter_v2_training_set
+-- ADD COLUMNS (
+--     f_req_usertype                                                   STRING
+--     ,is_chajia_conversion                                            BIGINT
+--     ,is_home_scene                                                   BIGINT
+--     ,is_search_scene                                                 BIGINT
+--     ,is_chajia_scene                                                 BIGINT
+-- );
+-- ALTER TABLE feature_mall_home_flow_2606_ctrcvr_sorter_v2_training_set SET lifecycle 180;
 
 set odps.sql.hive.compatible=true;
 INSERT OVERWRITE TABLE feature_mall_home_flow_2606_ctrcvr_sorter_v2_training_set PARTITION (dt = '${bdp.system.bizdate}')
@@ -2578,6 +2594,15 @@ SELECT  sq0.event_unix_time
         ,sq61.user__kv_item_type_cfr_360d
         ,sq61.user__kv_spu_id_cfr_360d
         ,sq61.user__kv_core_entity_cfr_360d
+        ,CASE
+            WHEN sq0.scene LIKE '%home_newuser%' THEN 'home_newuser'
+            WHEN sq0.scene LIKE '%home_silent_user%' THEN 'home_silent_user'
+        ELSE 'home_active_user'
+        END AS f_req_usertype
+        ,sq0.is_chajia_conversion
+        ,sq0.is_home_scene
+        ,sq0.is_search_scene
+        ,sq0.is_chajia_scene
 FROM    (
             SELECT  *
             FROM    home_flow_2606_ctrcvr_sorter_label_table_v2
