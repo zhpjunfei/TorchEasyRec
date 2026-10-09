@@ -1,0 +1,54 @@
+set odps.sql.type.system.odps2=true;
+
+
+-- ==========================================
+-- 1. 创建训练集表和验证集表 (仅首次运行需要)
+-- ==========================================
+-- DROP TABLE IF EXISTS home_flow_2608_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v1;
+-- CREATE TABLE home_flow_2608_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v1
+-- LIKE home_flow_2608_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v1 LIFECYCLE 1;
+-- ALTER TABLE home_flow_2608_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v1
+-- ADD COLUMNS (
+--   search_weight DOUBLE
+--   ,is_home_scene_click BIGINT
+--   ,is_bijia_scene_click BIGINT
+--   ,is_haojia_scene_click BIGINT
+--   ,is_trend_scene_click BIGINT
+-- );
+
+
+
+
+
+-- ==========================================
+-- 2. 每日调度执行：T-1 滑动窗口 + OOT 验证
+-- ==========================================
+-- NOTE: 比价样本存在 (mmb_id, item_id) 重复（不同 event_unix_time），
+--       通过 ROW_NUMBER 去重，每个 (dt, mmb_id, item_id) 只保留一条
+FROM (
+    SELECT  `(dt)?+.+`
+            ,ROW_NUMBER() OVER (PARTITION BY dt, mmb_id, item_id
+                                ORDER BY event_unix_time DESC) AS _dedup_rn
+    FROM    home_flow_2608_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v1
+    WHERE   dt > TO_CHAR(DATEADD(TO_DATE('${bdp.system.bizdate}','yyyymmdd'), -60, 'dd'), 'yyyymmdd')
+    AND     dt <= '${bdp.system.bizdate}'
+) _src
+
+
+-- 【产出训练集】 (前 60 天)
+INSERT OVERWRITE TABLE home_flow_2608_ctrcvr_sorter_config_pyfg_encoded_shuffled_60d_v1 PARTITION(dt='${bdp.system.bizdate}')
+SELECT
+`(dt)?+.+`
+,CASE
+  WHEN ARRAY_CONTAINS(f_req_page, 'search_price')
+   AND NOT ARRAY_CONTAINS(f_req_page, '1w_tab_f_index_content')
+   AND NOT ARRAY_CONTAINS(f_req_page, '1zhekoutuijian')
+  THEN 0.3
+  ELSE 1.0
+END AS search_weight
+,CAST(IF(is_home_scene = 1 AND is_click = 1, 1, 0) AS BIGINT) AS is_home_scene_click
+,CAST(IF(is_bijia_scene = 1 AND is_bijia_click = 1, 1, 0) AS BIGINT) AS is_bijia_scene_click
+,CAST(IF(is_haojia_scene = 1 AND is_haojia_click = 1, 1, 0) AS BIGINT) AS is_haojia_scene_click
+,CAST(IF(is_trend_scene = 1 AND is_trend_click = 1, 1, 0) AS BIGINT) AS is_trend_scene_click
+WHERE   _dedup_rn = 1
+DISTRIBUTE BY CAST(RAND() * 10000 AS BIGINT)

@@ -1,0 +1,226 @@
+--@exclude_output=
+SET odps.sql.type.system.odps2 = true;
+
+-- DROP TABLE IF EXISTS home_flow_2606_ctrcvr_sorter_label_table_v3;
+CREATE TABLE IF NOT EXISTS home_flow_2606_ctrcvr_sorter_label_table_v3
+(
+    event_unix_time       BIGINT
+    ,item_id              STRING
+    ,scene                STRING
+    ,mmb_id               STRING
+    ,request_id           STRING
+    ,page                 STRING
+    ,day_h                BIGINT COMMENT 'event_time在当天的第几小时'
+    ,week_day             BIGINT COMMENT 'event_time在一周得第几天'
+    ,is_click             BIGINT
+    ,is_conversion        BIGINT
+    ,is_favorite          BIGINT
+    ,is_like              BIGINT
+    ,is_bijia_click       BIGINT
+    ,is_bijia_conversion  BIGINT
+    ,is_haojia_click      BIGINT
+    ,is_haojia_conversion BIGINT
+    ,is_trend_click       BIGINT
+    ,is_trend_conversion  BIGINT
+    ,is_home_scene        BIGINT
+    ,is_bijia_scene       BIGINT
+    ,is_haojia_scene      BIGINT
+    ,is_trend_scene       BIGINT
+)
+PARTITIONED BY (dt STRING)
+LIFECYCLE 90
+;
+
+WITH raw AS
+(
+    SELECT  event_unix_time, item_id, mmb_id, request_id
+            ,scene, page, day_h, week_day, event
+    FROM    home_flow_2606_dwd_log_zhekou_rec_user_bhv_info_preprocess_v2
+    WHERE   dt = '${bdp.system.bizdate}'
+)
+
+, rec_sample AS
+(
+    SELECT  MIN(event_unix_time) AS event_unix_time
+            ,item_id, mmb_id, request_id
+            ,MAX(scene) AS scene, MAX(page) AS page
+            ,MAX(day_h) AS day_h, MAX(week_day) AS week_day
+                        ,MAX(IF(event='click',1,0)) AS is_click
+            ,MAX(IF(event='conversion',1,0)) AS is_conversion
+            ,MAX(IF(event='favorite',1,0)) AS is_favorite
+            ,MAX(IF(event='like',1,0)) AS is_like
+            ,CAST(0 AS BIGINT) AS is_bijia_click
+            ,CAST(0 AS BIGINT) AS is_bijia_conversion
+            ,CAST(0 AS BIGINT) AS is_haojia_click
+            ,CAST(0 AS BIGINT) AS is_haojia_conversion
+            ,CAST(0 AS BIGINT) AS is_trend_click
+            ,CAST(0 AS BIGINT) AS is_trend_conversion
+            ,CAST(1 AS BIGINT) AS is_home_scene
+            ,CAST(0 AS BIGINT) AS is_bijia_scene
+            ,CAST(0 AS BIGINT) AS is_haojia_scene
+            ,CAST(0 AS BIGINT) AS is_trend_scene
+    FROM    raw
+    WHERE   event IN ('exposure','click','conversion','favorite','like')
+    AND     request_id IS NOT NULL
+    GROUP BY item_id, mmb_id, request_id
+)
+
+, bijia_sample AS
+(
+    SELECT  MIN(event_unix_time) AS event_unix_time
+            ,item_id, mmb_id, request_id
+            ,MAX(scene) AS scene, MAX(page) AS page
+            ,MAX(day_h) AS day_h, MAX(week_day) AS week_day
+                        ,CAST(0 AS BIGINT) AS is_click
+            ,CAST(0 AS BIGINT) AS is_conversion
+            ,CAST(0 AS BIGINT) AS is_favorite
+            ,CAST(0 AS BIGINT) AS is_like
+            ,MAX(IF(event='search_bijia_click',1,0)) AS is_bijia_click
+            ,MAX(IF(event='search_bijia_conversion',1,0)) AS is_bijia_conversion
+            ,CAST(0 AS BIGINT) AS is_haojia_click
+            ,CAST(0 AS BIGINT) AS is_haojia_conversion
+            ,CAST(0 AS BIGINT) AS is_trend_click
+            ,CAST(0 AS BIGINT) AS is_trend_conversion
+            ,CAST(0 AS BIGINT) AS is_home_scene
+            ,CAST(1 AS BIGINT) AS is_bijia_scene
+            ,CAST(0 AS BIGINT) AS is_haojia_scene
+            ,CAST(0 AS BIGINT) AS is_trend_scene
+    FROM    raw
+    WHERE   event IN ('search_bijia_exposure','search_bijia_click','search_bijia_conversion')
+    AND     request_id IS NOT NULL
+    GROUP BY item_id, mmb_id, request_id
+)
+
+, haojia_sample AS
+(
+    SELECT  MIN(event_unix_time) AS event_unix_time
+            ,item_id, mmb_id, request_id
+            ,MAX(scene) AS scene, MAX(page) AS page
+            ,MAX(day_h) AS day_h, MAX(week_day) AS week_day
+                        ,CAST(0 AS BIGINT) AS is_click
+            ,CAST(0 AS BIGINT) AS is_conversion
+            ,CAST(0 AS BIGINT) AS is_favorite
+            ,CAST(0 AS BIGINT) AS is_like
+            ,CAST(0 AS BIGINT) AS is_bijia_click
+            ,CAST(0 AS BIGINT) AS is_bijia_conversion
+            ,MAX(IF(event='search_haojia_click',1,0)) AS is_haojia_click
+            ,MAX(IF(event='search_haojia_conversion',1,0)) AS is_haojia_conversion
+            ,CAST(0 AS BIGINT) AS is_trend_click
+            ,CAST(0 AS BIGINT) AS is_trend_conversion
+            ,CAST(0 AS BIGINT) AS is_home_scene
+            ,CAST(0 AS BIGINT) AS is_bijia_scene
+            ,CAST(1 AS BIGINT) AS is_haojia_scene
+            ,CAST(0 AS BIGINT) AS is_trend_scene
+    FROM    raw
+    WHERE   event IN ('search_haojia_exposure','search_haojia_click','search_haojia_conversion')
+    AND     request_id IS NOT NULL
+    GROUP BY item_id, mmb_id, request_id
+)
+
+, trend_sample AS
+(
+    SELECT  event_unix_time, item_id, mmb_id, request_id
+            ,MAX(scene) AS scene, MAX(page) AS page
+            ,MAX(day_h) AS day_h, MAX(week_day) AS week_day
+                        ,CAST(0 AS BIGINT) AS is_click
+            ,CAST(0 AS BIGINT) AS is_conversion
+            ,CAST(0 AS BIGINT) AS is_favorite
+            ,CAST(0 AS BIGINT) AS is_like
+            ,CAST(0 AS BIGINT) AS is_bijia_click
+            ,CAST(0 AS BIGINT) AS is_bijia_conversion
+            ,CAST(0 AS BIGINT) AS is_haojia_click
+            ,CAST(0 AS BIGINT) AS is_haojia_conversion
+            ,MAX(IF(event='trend_click',1,0)) AS is_trend_click
+            ,MAX(IF(event='trend_conversion',1,0)) AS is_trend_conversion
+            ,CAST(0 AS BIGINT) AS is_home_scene
+            ,CAST(0 AS BIGINT) AS is_bijia_scene
+            ,CAST(0 AS BIGINT) AS is_haojia_scene
+            ,CAST(1 AS BIGINT) AS is_trend_scene
+    FROM    raw
+    WHERE   event IN ('trend_exposure','trend_click','trend_conversion')
+    GROUP BY event_unix_time, item_id, mmb_id, request_id
+)
+
+, rec_filtered AS
+(
+    SELECT  event_unix_time, item_id, mmb_id, request_id, scene, page, day_h, week_day
+            ,is_click, is_conversion, is_favorite, is_like
+            ,is_bijia_click, is_bijia_conversion
+            ,is_haojia_click, is_haojia_conversion
+            ,is_trend_click, is_trend_conversion
+            ,is_home_scene, is_bijia_scene, is_haojia_scene, is_trend_scene
+            ,SUM(is_click) OVER (PARTITION BY mmb_id ORDER BY event_unix_time
+                  ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS click_cnt
+            ,SUM(is_click) OVER (PARTITION BY mmb_id) AS click_num
+    FROM    rec_sample
+    WHERE   is_click >= is_conversion
+)
+
+, bijia_clicked_pair AS
+(
+    SELECT DISTINCT mmb_id, request_id FROM bijia_sample WHERE is_bijia_click > 0
+)
+, bijia_filtered AS
+(
+    SELECT b.* FROM bijia_sample b
+    INNER JOIN bijia_clicked_pair p ON b.mmb_id=p.mmb_id AND b.request_id=p.request_id
+)
+
+, haojia_clicked_pair AS
+(
+    SELECT DISTINCT mmb_id, request_id FROM haojia_sample WHERE is_haojia_click > 0
+)
+, haojia_filtered AS
+(
+    SELECT h.* FROM haojia_sample h
+    INNER JOIN haojia_clicked_pair p ON h.mmb_id=p.mmb_id AND h.request_id=p.request_id
+)
+
+, trend_filtered AS
+(
+    SELECT * FROM trend_sample
+)
+
+INSERT OVERWRITE TABLE home_flow_2606_ctrcvr_sorter_label_table_v3
+PARTITION (dt='${bdp.system.bizdate}')
+SELECT event_unix_time, item_id, scene, mmb_id, request_id, page, day_h, week_day
+      ,is_click, is_conversion, is_favorite, is_like
+      ,is_bijia_click, is_bijia_conversion
+      ,is_haojia_click, is_haojia_conversion
+      ,is_trend_click, is_trend_conversion
+      ,is_home_scene, is_bijia_scene, is_haojia_scene, is_trend_scene
+FROM (
+    SELECT event_unix_time, item_id, scene, mmb_id, request_id, page, day_h, week_day
+              ,is_click, is_conversion, is_favorite, is_like
+              ,is_bijia_click, is_bijia_conversion
+              ,is_haojia_click, is_haojia_conversion
+              ,is_trend_click, is_trend_conversion
+              ,is_home_scene, is_bijia_scene, is_haojia_scene, is_trend_scene
+        FROM rec_filtered
+        WHERE click_cnt > 0 AND click_num < 100
+    UNION ALL
+    SELECT event_unix_time, item_id, scene, mmb_id, request_id, page, day_h, week_day
+              ,is_click, is_conversion, is_favorite, is_like
+              ,is_bijia_click, is_bijia_conversion
+              ,is_haojia_click, is_haojia_conversion
+              ,is_trend_click, is_trend_conversion
+              ,is_home_scene, is_bijia_scene, is_haojia_scene, is_trend_scene
+        FROM bijia_filtered
+    UNION ALL
+    SELECT event_unix_time, item_id, scene, mmb_id, request_id, page, day_h, week_day
+              ,is_click, is_conversion, is_favorite, is_like
+              ,is_bijia_click, is_bijia_conversion
+              ,is_haojia_click, is_haojia_conversion
+              ,is_trend_click, is_trend_conversion
+              ,is_home_scene, is_bijia_scene, is_haojia_scene, is_trend_scene
+        FROM haojia_filtered
+    UNION ALL
+    SELECT event_unix_time, item_id, scene, mmb_id, request_id, page, day_h, week_day
+              ,is_click, is_conversion, is_favorite, is_like
+              ,is_bijia_click, is_bijia_conversion
+              ,is_haojia_click, is_haojia_conversion
+              ,is_trend_click, is_trend_conversion
+              ,is_home_scene, is_bijia_scene, is_haojia_scene, is_trend_scene
+        FROM trend_filtered
+) t
+;
