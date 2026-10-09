@@ -21,6 +21,7 @@ from torchrec.distributed.planner import (
     planners,
     shard_estimators,
 )
+
 try:
     from torchrec.distributed.planner.estimator.types import HardwarePerfConfig
 
@@ -389,7 +390,6 @@ if has_dynamicemb:
     planners.to_sharding_plan = _to_sharding_plan
 
     if _has_hw_perf_config:
-
         _orig_hw_perf_config_get_device_bw = HardwarePerfConfig.get_device_bw
 
         def _customized_kernel_aware_get_device_bw(

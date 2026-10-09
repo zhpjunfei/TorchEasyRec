@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-05-29 tags: [archive, torch-easy-rec, training] status: archived related: ["[[../10-architecture/pepnet-dcn-ple]]"]
+## date: 2026-05-29 tags: [archive, torch-easy-rec, training] status: archived related: \["\[[../10-architecture/pepnet-dcn-ple]\]"\]
 
 # TorchEasyRec E2E 训练流程
 

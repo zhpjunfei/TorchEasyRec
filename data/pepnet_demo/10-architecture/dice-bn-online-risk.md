@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-06-01 tags: [architecture, dice, batchnorm, inference, risk] status: active related: ["[[pepnet-dcn-ple]]", "[[model-components]]"]
+## date: 2026-06-01 tags: [architecture, dice, batchnorm, inference, risk] status: active related: \["\[[pepnet-dcn-ple]\]", "\[[model-components]\]"\]
 
 # Dice 激活函数中 BatchNorm 在线上推理时的风险评估
 

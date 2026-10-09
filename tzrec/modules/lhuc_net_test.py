@@ -20,9 +20,7 @@ class LHUC_EPNetTest(unittest.TestCase):
     def test_epnet_basic(self) -> None:
         lhuc_dim = 16
         output_dim = 32
-        epnet = LHUC_EPNet(
-            lhuc_dim=lhuc_dim, output_dim=output_dim, hidden_units=[64]
-        )
+        epnet = LHUC_EPNet(lhuc_dim=lhuc_dim, output_dim=output_dim, hidden_units=[64])
         self.assertEqual(epnet.output_dim(), output_dim)
         batch_size = 4
         lhuc_input = torch.randn(batch_size, lhuc_dim)
@@ -131,7 +129,10 @@ class LHUC_PPNetTest(unittest.TestCase):
 
     def test_ppnet_forward_output_values(self) -> None:
         ppnet = LHUC_PPNet(
-            input_dim=8, lhuc_dim=4, nn_dims=[16, 1], nn_activation="nn.ReLU",
+            input_dim=8,
+            lhuc_dim=4,
+            nn_dims=[16, 1],
+            nn_activation="nn.ReLU",
         )
         ppnet.eval()
         x = torch.randn(4, 8)

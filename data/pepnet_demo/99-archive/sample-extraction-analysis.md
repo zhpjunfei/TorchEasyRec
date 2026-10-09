@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-05-30 tags: [archive, sample, extraction] status: archived related: ["[[../30-data/sample-v3-pipeline]]"]
+## date: 2026-05-30 tags: [archive, sample, extraction] status: archived related: \["\[[../30-data/sample-v3-pipeline]\]"\]
 
 # 样本提取分析 & 优化
 

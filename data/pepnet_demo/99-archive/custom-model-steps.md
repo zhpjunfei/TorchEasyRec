@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-05-29 tags: [archive, torch-easy-rec, custom-model] status: archived related: ["[[../10-architecture/pepnet-dcn-ple]]"]
+## date: 2026-05-29 tags: [archive, torch-easy-rec, custom-model] status: archived related: \["\[[../10-architecture/pepnet-dcn-ple]\]"\]
 
 # TorchEasyRec 自定义模型流程
 

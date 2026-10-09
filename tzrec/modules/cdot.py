@@ -48,9 +48,7 @@ class CDOT(nn.Module):
         self._output_dim = output_dim
         self.mid_dim = mid_dim
 
-        self.sub_compress_weight = nn.Parameter(
-            torch.empty(num_slots, mid_dim)
-        )
+        self.sub_compress_weight = nn.Parameter(torch.empty(num_slots, mid_dim))
         nn.init.xavier_uniform_(self.sub_compress_weight)
 
         compress_layers = []
@@ -62,17 +60,13 @@ class CDOT(nn.Module):
         compress_layers.append(nn.Linear(prev, num_slots * output_dim))
         self.compress_mlp = nn.Sequential(*compress_layers)
 
-        self.compress_bias = nn.Parameter(
-            torch.zeros(1, input_dim, output_dim)
-        )
+        self.compress_bias = nn.Parameter(torch.zeros(1, input_dim, output_dim))
 
     def output_dim(self) -> int:
         """Output dimension: num_slots * output_dim (both allint_out and allint_mid_out)."""
         return self.num_slots * self._output_dim
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass for CDOT.
 
         Args:
@@ -86,22 +80,16 @@ class CDOT(nn.Module):
 
         transposed = x.transpose(1, 2)
 
-        sub_input = transposed.reshape(
-            batch_size * self.input_dim, self.num_slots
-        )
+        sub_input = transposed.reshape(batch_size * self.input_dim, self.num_slots)
         sub_output = torch.mm(sub_input, self.sub_compress_weight)
-        sub_flat = sub_output.reshape(
-            batch_size, self.input_dim * self.mid_dim
-        )
+        sub_flat = sub_output.reshape(batch_size, self.input_dim * self.mid_dim)
 
         compress_wt_flat = self.compress_mlp(sub_flat)
         compress_wt = compress_wt_flat.reshape(
             batch_size, self.num_slots, self._output_dim
         )
 
-        transformed = (
-            torch.bmm(transposed, compress_wt) + self.compress_bias
-        )
+        transformed = torch.bmm(transposed, compress_wt) + self.compress_bias
 
         allint_out = torch.bmm(x, transformed)
 

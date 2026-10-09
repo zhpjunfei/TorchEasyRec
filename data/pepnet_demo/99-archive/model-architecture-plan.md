@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-05-30 tags: [archive, architecture, plan] status: archived related: ["[[../10-architecture/pepnet-dcn-ple]]"]
+## date: 2026-05-30 tags: [archive, architecture, plan] status: archived related: \["\[[../10-architecture/pepnet-dcn-ple]\]"\]
 
 # PEPNET_DCN_PLE 架构方案
 

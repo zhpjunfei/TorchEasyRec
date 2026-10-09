@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-05-30 tags: [archive, pepnet-v2, explanation] status: archived related: ["[[../10-architecture/pepnet-v2]]"]
+## date: 2026-05-30 tags: [archive, pepnet-v2, explanation] status: archived related: \["\[[../10-architecture/pepnet-v2]\]"\]
 
 # PEPNet_v2 模型逐行讲解
 

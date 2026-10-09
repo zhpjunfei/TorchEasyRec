@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-06-24 tags: [experiment, v13, review] status: completed related: ["[[v12-experiments]]", "[[v14-experiments]]"]
+## date: 2026-06-24 tags: [experiment, v13, review] status: completed related: \["\[[v12-experiments]\]", "\[[v14-experiments]\]"\]
 
 # 优化方向深度审核
 

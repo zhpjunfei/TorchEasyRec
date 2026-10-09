@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-05-30 tags: [archive, relation-mlp] status: archived related: ["[[../10-architecture/model-components]]"]
+## date: 2026-05-30 tags: [archive, relation-mlp] status: archived related: \["\[[../10-architecture/model-components]\]"\]
 
 # Relation MLP 配置及原理
 

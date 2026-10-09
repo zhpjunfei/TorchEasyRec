@@ -1,6 +1,6 @@
 ______________________________________________________________________
 
-## date: 2026-05-30 tags: [archive, error, log] status: archived related: ["[[../40-errors/index]]"]
+## date: 2026-05-30 tags: [archive, error, log] status: archived related: \["\[[../40-errors/index]\]"\]
 
 # 实验报错记录
 
