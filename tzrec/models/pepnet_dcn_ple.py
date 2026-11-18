@@ -66,6 +66,95 @@ def _extract_cdot_fn(
     return torch.stack(slots, dim=1)
 
 
+# --- Gradient conflict monitoring helpers (Suggestion 3) ---
+GRAD_CONFLICT_COS_THRESHOLD = -0.1
+GRAD_CONFLICT_EMA_ALPHA = 0.05
+
+
+def _attach_task_grad_hook(
+    store: Dict[str, Dict[str, torch.Tensor]],
+    task_name: str,
+    param_name: str,
+    param: torch.Tensor,
+    handles: List[torch.Tensor],
+) -> None:
+    """Register a grad hook storing per-(task, param-name) flattened grads.
+
+    Storing under distinct param names avoids the previous last-write-wins
+    bug where weight and bias hooks overwrote the same task key (bias grads
+    are 1-element for num_class=1, which made cosine degenerate to +-1).
+    """
+
+    def hook(grad: Optional[torch.Tensor]) -> None:
+        if grad is not None:
+            store[task_name][param_name] = grad.detach().flatten()
+
+    handles.append(param.register_hook(hook))
+
+
+def _gather_task_grads(
+    task_gradients: Dict[str, Any],
+) -> Dict[str, torch.Tensor]:
+    """Gather non-empty task gradients.
+
+    Supports both formats: legacy flat tensors, and per-param dicts (new
+    format) which are concatenated in sorted param-name order so that tasks
+    with the same layer structure stay channel-aligned.
+    """
+    grads: Dict[str, torch.Tensor] = {}
+    for name, val in task_gradients.items():
+        if val is None:
+            continue
+        if isinstance(val, dict):
+            if not val:
+                continue
+            grads[name] = torch.cat([val[k] for k in sorted(val)])
+        else:
+            grads[name] = val
+    return grads
+
+
+def _pairwise_grad_stats(
+    grads: Dict[str, torch.Tensor], prefix: str = ""
+) -> Dict[str, Any]:
+    """Gradient norms, pairwise cosine similarities and conflict flags."""
+    result: Dict[str, Any] = {}
+    if len(grads) < 2:
+        return result
+    for name, grad in grads.items():
+        result[f"{prefix}grad_norm_{name}"] = grad.norm().item()
+    names = list(grads.keys())
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            g1, g2 = grads[names[i]], grads[names[j]]
+            cos_sim = F.cosine_similarity(g1, g2, dim=0).item()
+            result[f"{prefix}grad_cos_sim_{names[i]}_{names[j]}"] = cos_sim
+            # Negative cosine = conflict, positive = alignment
+            result[f"{prefix}grad_conflict_{names[i]}_{names[j]}"] = bool(
+                cos_sim < GRAD_CONFLICT_COS_THRESHOLD
+            )
+    return result
+
+
+def _ema_update(
+    ema_store: Dict[str, float],
+    values: Dict[str, Any],
+    alpha: float = GRAD_CONFLICT_EMA_ALPHA,
+) -> Dict[str, float]:
+    """EMA-smooth float metrics; returns ``ema_*``-prefixed copies."""
+    out: Dict[str, float] = {}
+    for k, v in values.items():
+        if isinstance(v, bool):
+            continue
+        if not isinstance(v, float):
+            continue
+        prev = ema_store.get(k)
+        cur = v if prev is None else alpha * v + (1.0 - alpha) * prev
+        ema_store[k] = cur
+        out[f"ema_{k}"] = cur
+    return out
+
+
 class PEPNetDCNPLE(MultiTaskRank):
     """PEPNet + DCNv2 + PLE (ExtractionNet) fusion architecture.
 
@@ -398,28 +487,25 @@ class PEPNetDCNPLE(MultiTaskRank):
 
         # --- Suggestion 3: Gradient conflict monitoring hooks ---
         # Register hooks on task tower parameters to collect per-task gradients.
-        # Computes cosine similarity between CTR and CVR gradients for conflict
-        # quantification (addresses "no gradient conflict evidence" gap).
-        # Must be placed after _tower_final is populated above.
+        # Computes cosine similarity between task gradients for conflict
+        # quantification. Must be placed after _tower_final is populated above.
         self._gradient_hooks = []
-        self._task_gradients: Dict[str, Optional[torch.Tensor]] = {}
+        self._task_gradients: Dict[str, Dict[str, torch.Tensor]] = {}
+        self._grad_conflict_ema: Dict[str, float] = {}
         for tower_name in self._tower_hidden_dims:
-            self._task_gradients[tower_name] = None
+            self._task_gradients[tower_name] = {}
         # Register hooks on each tower's final linear layer parameters.
-        # Hook captures the gradient of the output logits for each task.
-        # Uses register_hook on parameters (modern PyTorch API).
+        # Grads are stored per (task, param_name) and concatenated at compute
+        # time in sorted param-name order (fixes weight/bias last-write-wins).
         for tower_name, final_layer in self._tower_final.items():
-
-            def make_hook(name):
-                def hook(grad):
-                    if grad is not None:
-                        self._task_gradients[name] = grad.flatten()
-
-                return hook
-
-            for param in final_layer.parameters():
-                handle = param.register_hook(make_hook(tower_name))
-                self._gradient_hooks.append(handle)
+            for pname, param in final_layer.named_parameters():
+                _attach_task_grad_hook(
+                    self._task_gradients,
+                    tower_name,
+                    pname,
+                    param,
+                    self._gradient_hooks,
+                )
 
         self._cvr_tower_names = [
             n for n in self._tower_hidden_dims if n != self._ctr_tower_name
@@ -981,40 +1067,84 @@ class PEPNetDCNPLE(MultiTaskRank):
 
     # --- Suggestion 3: Gradient conflict monitoring ---
     def compute_gradient_conflict(self) -> Dict[str, float]:
-        """Compute cosine similarity between task gradients.
+        """Compute cosine similarity between task gradients (tower heads).
 
         Must be called AFTER backward() (after the trainer calls loss.backward()).
-        Returns a dict with gradient norms and pairwise cosine similarities.
-        Returns empty dict if gradients haven't been collected yet.
+        Returns gradient norms and pairwise cosine similarities of each
+        task's final-layer grads (a weak proxy for conflict; for the real
+        shared-parameter conflict see compute_shared_grad_conflict).
+        Float entries are additionally EMA-smoothed under ``ema_*`` keys.
         """
-        result = {}
-        # Gather all non-None gradients
-        grads = {
-            name: grad
-            for name, grad in self._task_gradients.items()
-            if grad is not None
-        }
+        grads = _gather_task_grads(self._task_gradients)
         if len(grads) < 2:
-            return result
+            return {}
+        result: Dict[str, float] = _pairwise_grad_stats(grads)
+        ema = getattr(self, "_grad_conflict_ema", None)
+        if not isinstance(ema, dict):
+            ema = {}
+            self._grad_conflict_ema = ema
+        result.update(_ema_update(ema, result))
+        return result
 
-        # Compute norms
-        for name, grad in grads.items():
-            result[f"grad_norm_{name}"] = grad.norm().item()
+    def compute_shared_grad_conflict(self, batch: Batch) -> Dict[str, float]:
+        """Per-task gradients w.r.t. PLE shared parameters (real conflict).
 
-        # Compute pairwise cosine similarities
-        names = list(grads.keys())
-        for i in range(len(names)):
-            for j in range(i + 1, len(names)):
-                g1 = grads[names[i]]
-                g2 = grads[names[j]]
-                cos_sim = F.cosine_similarity(g1, g2, dim=0).item()
-                result[f"grad_cos_sim_{names[i]}_{names[j]}"] = cos_sim
-                # Negative cosine = conflict, positive = alignment
-                if cos_sim < -0.1:
-                    result[f"grad_conflict_{names[i]}_{names[j]}"] = True
-                else:
-                    result[f"grad_conflict_{names[i]}_{names[j]}"] = False
+        Task interference lives on shared trunk parameters, not on the
+        task-private tower heads. At log steps this runs one extra forward
+        plus one partial backward per task (torch.autograd.grad with
+        retain_graph) against the ExtractionNet shared experts/gates.
 
+        WARNING: this method runs an EXTRA forward through the model. Under
+        torchrec TrainPipelineSparseDist (PipelinedForward), embedding modules
+        may only be evoked once per step; a second forward corrupts the
+        input_dist request bookkeeping and crashes the next step with
+        "Invalid PipelinedForward usage ... consumed by others". It is
+        therefore gated behind TZREC_SHARED_GRAD_MONITOR=1 in main.py and must
+        only be used on non-pipelined runs.
+
+        Returns ``shared_grad_norm_*`` and ``shared_grad_cos_sim_*`` (+ EMA
+        variants). Cost: <2% step time when called every ~100 steps.
+        """
+        shared_params: List[torch.Tensor] = []
+        for net in self._extraction_nets:
+            shared_params.extend(
+                p for p in net._shared_layers.parameters() if p.requires_grad
+            )
+            gate = getattr(net, "_shared_gate", None)
+            if gate is not None:
+                shared_params.extend(p for p in gate.parameters() if p.requires_grad)
+        if not shared_params:
+            return {}
+
+        per_task: Dict[str, torch.Tensor] = {}
+        with torch.enable_grad():
+            predictions = self.forward(batch)
+            # MultiTaskRank.loss directly: avoids resetting _task_gradients
+            # and skips AFP/calibration extras -- we want clean per-task BCEs.
+            losses = super().loss(predictions, batch)
+            for key, task_loss in losses.items():
+                if not isinstance(task_loss, torch.Tensor):
+                    continue
+                if not key.startswith("binary_cross_entropy_"):
+                    continue
+                task = key[len("binary_cross_entropy_") :]
+                grads = torch.autograd.grad(
+                    task_loss,
+                    shared_params,
+                    retain_graph=True,
+                    allow_unused=True,
+                )
+                flat = torch.cat([g.flatten() for g in grads if g is not None])
+                if flat.numel() == 0:
+                    continue
+                per_task[task] = flat
+
+        result: Dict[str, float] = _pairwise_grad_stats(per_task, prefix="shared_")
+        ema = getattr(self, "_grad_conflict_ema", None)
+        if not isinstance(ema, dict):
+            ema = {}
+            self._grad_conflict_ema = ema
+        result.update(_ema_update(ema, result))
         return result
 
     def loss(
@@ -1028,7 +1158,7 @@ class PEPNetDCNPLE(MultiTaskRank):
         # --- Suggestion 3: Collect per-task gradients via hooks ---
         # Clear previous gradients before backward
         for task_name in self._task_gradients:
-            self._task_gradients[task_name] = None
+            self._task_gradients[task_name] = {}
 
         losses = super().loss(predictions, batch)
 

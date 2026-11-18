@@ -10,9 +10,9 @@ repos:
     hooks:
       - id: ruff
         args: [ --fix ]
-        exclude: ^data/pepnet_demo/sql/sample_v3/home_flow_2604_pepnet_sorter_train_export_(nsmpl|platt).py$
+        exclude: ^data/pepnet_demo/sql/(sample_v3/home_flow_2604_pepnet_sorter_train_export_(nsmpl|platt)|2609/home_flow_2604_sorter_train_export_multiscene)\.py$
       - id: ruff-format
-        exclude: ^data/pepnet_demo/sql/sample_v3/home_flow_2604_pepnet_sorter_train_export_(nsmpl|platt).py$
+        exclude: ^data/pepnet_demo/sql/(sample_v3/home_flow_2604_pepnet_sorter_train_export_(nsmpl|platt)|2609/home_flow_2604_sorter_train_export_multiscene)\.py$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -27,7 +27,7 @@ repos:
     rev: v2.4.2
     hooks:
       - id: codespell
-        args: ["--skip", "*.json", "-L", "TBE,dout,MoT,intergral"]
+        args: ["--skip", "*.json", "-L", "TBE,dout,MoT,intergral,FPR"]
   - repo: https://github.com/executablebooks/mdformat
     rev: 0.7.22
     hooks:

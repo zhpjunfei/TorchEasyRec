@@ -9,6 +9,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import os
 from collections import OrderedDict, defaultdict
 from functools import partial  # NOQA
@@ -244,7 +245,39 @@ class EmbeddingGroup(nn.Module):
         # When the same embedding_name appears in both a bag EmbeddingBagCollection
         # and a sequence EmbeddingCollection, alias the seq weight → bag weight.
         # This gives both target and sequence item_id a single shared embedding table.
-        for impl_key in set(self.emb_impls.keys()) & set(self.seq_emb_impls.keys()):
+        #
+        # WARNING (2026-10-24): under multi-rank DDP+DMP with TrainPipeline, the
+        # alias can break torchrec's fused input_dist bookkeeping
+        # ("PipelinedForward usage, input_dist ... consumed by others"). The
+        # shared-name table merging inside one collection still applies; only the
+        # cross-collection weight alias is skipped when world_size > 1.
+        # Overrides: TZREC_DISABLE_EMB_ALIAS=1 (always skip),
+        #            TZREC_FORCE_EMB_ALIAS=1 (alias even in multi-rank).
+        _alias_disabled = os.environ.get("TZREC_DISABLE_EMB_ALIAS", "") == "1"
+        _alias_forced = os.environ.get("TZREC_FORCE_EMB_ALIAS", "") == "1"
+        if not _alias_disabled and not _alias_forced:
+            try:
+                _ws = (
+                    torch.distributed.get_world_size()
+                    if torch.distributed.is_available()
+                    and torch.distributed.is_initialized()
+                    else 1
+                )
+            except Exception:
+                _ws = 1
+            if _ws > 1:
+                logging.warning(
+                    "bag↔seq embedding weight aliasing SKIPPED in multi-rank "
+                    "training (world_size=%d) to keep TrainPipeline input_dist "
+                    "bookkeeping safe. Set TZREC_FORCE_EMB_ALIAS=1 to override.",
+                    _ws,
+                )
+                _alias_disabled = True
+        for impl_key in (
+            set()
+            if _alias_disabled
+            else set(self.emb_impls.keys()) & set(self.seq_emb_impls.keys())
+        ):
             bag_impl = self.emb_impls[impl_key]
             seq_impl = self.seq_emb_impls[impl_key]
             if not hasattr(bag_impl, "ebc"):

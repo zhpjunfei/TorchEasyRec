@@ -10,6 +10,7 @@
 # limitations under the License.
 
 
+import math
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -34,16 +35,29 @@ _meta_cls = get_register_class_meta(_SEQ_ENCODER_CLASS_MAP)
 def _attention_mask(
     sequence: torch.Tensor, num_heads: int, sequence_length: torch.Tensor
 ) -> torch.Tensor:
+    """Build additive float attention bias [B*num_heads, L, L] (query x key).
+
+    Only *key* validity is masked (pad keys get a large finite negative bias);
+    query rows are never fully masked. A finite bias (not -inf) keeps softmax
+    finite even for fully-masked rows (empty sequences), which otherwise yields
+    NaN forwards hidden by nan_to_num but NaN gradients (NaN*0=NaN) in backward.
+    """
     batch_size, max_seq_length, _ = sequence.size()
     mask = (
         torch.arange(max_seq_length, device=sequence_length.device)
         .unsqueeze(0)
         .expand(batch_size, max_seq_length)
     )
-    mask = (mask < sequence_length.unsqueeze(1)).int()
-    mask = ~(torch.multiply(mask.unsqueeze(2), mask.unsqueeze(1)).type(torch.bool))
-    mask = mask.repeat_interleave(repeats=num_heads, dim=0)
-    return mask
+    key_valid = (mask < sequence_length.unsqueeze(1)).type(torch.bool)
+    attn_bias = torch.zeros(
+        batch_size,
+        max_seq_length,
+        max_seq_length,
+        dtype=sequence.dtype,
+        device=sequence_length.device,
+    ).masked_fill(~key_valid.unsqueeze(1), -1.0e4)
+    attn_bias = attn_bias.repeat_interleave(repeats=num_heads, dim=0)
+    return attn_bias
 
 
 class SequenceEncoder(nn.Module, metaclass=_meta_cls):
@@ -302,6 +316,11 @@ class SelfAttentionEncoder(SequenceEncoder):
         )  # [B*num_heads, L, L]
         attn_output, attn_weights = self._multihead_attn(Q, K, V, attn_mask=attn_mask)
         attn_output = torch.nan_to_num(attn_output, nan=0.0)
+        valid_mask = (
+            fx_arange(attn_output.size(1), device=sequence_length.device).unsqueeze(0)
+            < sequence_length.unsqueeze(1)
+        ).unsqueeze(-1)
+        attn_output = attn_output * valid_mask
         sequence_length = torch.clamp_min(sequence_length, 1)
         output = attn_output.sum(dim=1) / sequence_length.unsqueeze(1)
         return output
@@ -416,11 +435,33 @@ def create_seq_encoder(
     return seq_encoder
 
 
+def _sinusoidal_pos_encoding(
+    max_seq_length: int,
+    div_term: torch.Tensor,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Standard sinusoidal positional encoding [T, dim] (Vaswani et al.).
+
+    fx-trace safe (the torchrec train pipeline symbolically traces the model):
+    no numpy scalars mixed with traced Proxies (``np.float64 / Proxy`` raises
+    ``ValueError: invalid __array_struct__``), no in-place slice writes, no
+    dynamic-shape slicing. ``div_term`` is the precomputed
+    ``exp(arange(0, dim, 2) * -log(10000)/dim)`` buffer ([dim/2] float32)
+    registered in ``TransformerEncoder.__init__``; PE dims follow the same
+    even-dim interleaving (sin at even columns, cos at odd columns).
+    """
+    position = fx_arange(max_seq_length, device=device).unsqueeze(1).float()
+    angle = position * div_term
+    pe = torch.stack((torch.sin(angle), torch.cos(angle)), dim=-1).flatten(-2)
+    return pe.to(dtype)
+
+
 class TransformerEncoder(SequenceEncoder):
     """Transformer-based target-aware sequence encoder.
 
     Architecture:
-        s -> proj_in_s -> TransformerEncoder -> h
+        s -> proj_in_s -> [optional sinusoidal PE] -> TransformerEncoder -> h
         q -> proj_in_q -> cross-attention(q, h) -> attended
         gate = sigmoid(MLP([q_proj, attended, q⊙attended])) -> [B,128]
         fused = attended*gate + mean(h)*(1-gate)
@@ -429,8 +470,9 @@ class TransformerEncoder(SequenceEncoder):
     Two orthogonal attention mechanisms with distinct roles:
     - Self-attention (Transformer): pure intra-sequence dependency modeling.
       Target item is NOT injected into the sequence — no target leakage.
-    - Cross-attention (dot-product q·h/√d): selects positions via query-key
-      similarity — 0 learned parameters, no attention redundancy.
+    - Cross-attention readout: default 'dot_product' (q·h/√d, 0 learned
+      params); optional 'din_mlp' readout scores each position with a DIN-style
+      4-way interaction MLP over [q, h, q-h, q*h] (requires attn_mlp).
 
     Key design points:
     1. No target leakage: Transformer sees only s, not s+q.
@@ -449,6 +491,10 @@ class TransformerEncoder(SequenceEncoder):
         num_layers (int): number of transformer encoder layers.
         dropout (float): dropout rate for transformer layers.
         max_seq_length (int): maximum sequence length.
+        use_pos_encoding (bool): add sinusoidal positional encoding before the
+            transformer layers. Default False keeps legacy behavior.
+        readout_type (str): 'dot_product' (default) or 'din_mlp'.
+        attn_mlp (dict): mlp config for 'din_mlp' readout scoring.
     """
 
     def __init__(
@@ -461,6 +507,9 @@ class TransformerEncoder(SequenceEncoder):
         num_layers: int = 1,
         dropout: float = 0.0,
         max_seq_length: int = 0,
+        use_pos_encoding: bool = False,
+        readout_type: str = "dot_product",
+        attn_mlp: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> None:
         super().__init__(input)
@@ -469,6 +518,28 @@ class TransformerEncoder(SequenceEncoder):
         self._transformer_hidden = transformer_hidden
         self._num_heads = num_heads
         self._max_seq_length = max_seq_length
+        self._use_pos_encoding = use_pos_encoding
+        self._readout_type = readout_type
+
+        # Sinusoidal PE div_term buffer (opt-in): zero parameters and
+        # persistent=False keeps it out of state_dict, so checkpoints stay
+        # compatible with runs that do not enable pos encoding. Built with
+        # concrete ints + math (never numpy): this buffer may be consumed
+        # inside fx-traced forwards where numpy-on-Proxy fails.
+        if use_pos_encoding:
+            if transformer_hidden % 2 != 0:
+                raise ValueError(
+                    f"use_pos_encoding requires even transformer_hidden, "
+                    f"got {transformer_hidden}"
+                )
+            self.register_buffer(
+                "_pe_div_term",
+                torch.exp(
+                    torch.arange(0, transformer_hidden, 2, dtype=torch.float32)
+                    * (-math.log(10000.0) / transformer_hidden)
+                ),
+                persistent=False,
+            )
 
         self._query_name = f"{input}.query"
         self._sequence_name = f"{input}.sequence"
@@ -495,7 +566,18 @@ class TransformerEncoder(SequenceEncoder):
         )
         self._transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # Cross-attention selection: q · h_i / √d
+        # Cross-attention readout scoring
+        if readout_type not in ("dot_product", "din_mlp"):
+            raise ValueError(
+                f"readout_type must be 'dot_product' or 'din_mlp', got {readout_type}"
+            )
+        if readout_type == "din_mlp":
+            if attn_mlp is None:
+                raise ValueError("readout_type='din_mlp' requires attn_mlp")
+            self._readout_mlp = MLP(
+                in_features=transformer_hidden * 4, dim=3, **attn_mlp
+            )
+            self._readout_linear = nn.Linear(self._readout_mlp.hidden_units[-1], 1)
         # proj_in_q and proj_in_s both project to transformer_hidden space,
         # ensuring q_proj and h live in the same linear space for clean dot-product.
 
@@ -536,13 +618,25 @@ class TransformerEncoder(SequenceEncoder):
         # ── Pure sequence encoding (no target leakage) ──
         h = self._proj_in_s(sequence)
         h = self._dropout_in(h)
+        if self._use_pos_encoding:
+            h = h + _sinusoidal_pos_encoding(
+                h.size(1), self._pe_div_term, h.device, h.dtype
+            ).unsqueeze(0)
         h = self._transformer(h, src_key_padding_mask=~sequence_mask)
 
-        # ── Cross-attention selection: q · h_i / √d ──
+        # ── Cross-attention readout scoring ──
         q_proj = self._proj_in_q(query).unsqueeze(1)
-        scores = torch.matmul(q_proj, h.transpose(1, 2)) / (
-            self._transformer_hidden**0.5
-        )
+        if self._readout_type == "din_mlp":
+            q_expanded = q_proj.expand(-1, max_seq_length, -1)
+            attn_input = torch.cat(
+                [q_expanded, h, q_expanded - h, q_expanded * h],
+                dim=-1,
+            )
+            scores = self._readout_linear(self._readout_mlp(attn_input)).transpose(1, 2)
+        else:
+            scores = torch.matmul(q_proj, h.transpose(1, 2)) / (
+                self._transformer_hidden**0.5
+            )
 
         padding = torch.ones_like(scores) * (-(2**31) + 1)
         scores = torch.where(sequence_mask.unsqueeze(1), scores, padding)

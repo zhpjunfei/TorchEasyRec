@@ -1,4 +1,7 @@
-exclude = ["data/pepnet_demo/sql/sample_v3/home_flow_2604_pepnet_sorter_train_export.py"]
+exclude = [
+    "data/pepnet_demo/sql/sample_v3/home_flow_2604_pepnet_sorter_train_export.py",
+    "data/pepnet_demo/sql/2609/home_flow_2604_sorter_train_export_multiscene.py",
+]
 lint.select = ["B", "D", "E", "F", "W", "B9", "I"]
 lint.ignore = ["D100", "D104", "D105", "D107", "B905"]
 

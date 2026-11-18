@@ -79,6 +79,18 @@ message TransformerEncoder {
     optional float dropout = 6 [default = 0.0];
     // maximum sequence length
     optional int32 max_seq_length = 7 [default = 0];
+    // if true, add sinusoidal positional encoding to the projected sequence
+    // before transformer layers (order/position awareness). default false
+    // keeps the legacy query-free-of-position behavior bit-identical.
+    optional bool use_pos_encoding = 8 [default = false];
+    // readout scoring type:
+    //   'dot_product' (default): scaled q·h / sqrt(d), 0 learned params
+    //   'din_mlp': DIN-style 4-way interaction MLP scoring over
+    //     [q, h, q-h, q*h] per position (requires attn_mlp)
+    optional string readout_type = 9 [default = 'dot_product'];
+    // mlp config for 'din_mlp' readout scoring (same semantics as
+    // DINEncoder.attn_mlp)
+    optional MLP attn_mlp = 10;
 }
 
 message SeqEncoderConfig {

@@ -340,6 +340,18 @@ def _train_and_evaluate(
     """Train and evaluate the model."""
     is_rank_zero = int(os.environ.get("RANK", 0)) == 0
     is_local_rank_zero = int(os.environ.get("LOCAL_RANK", 0)) == 0
+    if is_rank_zero:
+        # Self-documenting distributed env: settle "how many cards/procs did
+        # this run actually use" from the log itself (do not infer from
+        # [rank] prefixes — torchrun prefixes only raw stderr, not logger
+        # output). One line at startup answers it forever.
+        logger.info(
+            "[DIST_ENV] WORLD_SIZE=%s RANK=%s LOCAL_RANK=%s LOCAL_WORLD_SIZE=%s",
+            os.environ.get("WORLD_SIZE", "1"),
+            os.environ.get("RANK", "0"),
+            os.environ.get("LOCAL_RANK", "0"),
+            os.environ.get("LOCAL_WORLD_SIZE", "1"),
+        )
     model.train()
     _model = model.module.model
 
@@ -473,23 +485,59 @@ def _train_and_evaluate(
                                 )
 
                 # --- Gradient conflict monitoring (APPNet) ---
+                # Runs regardless of TensorBoard; results always go to the
+                # text log so they are visible without any extra tooling.
                 if (
                     hasattr(_model, "compute_gradient_conflict")
                     and i_step % train_config.log_step_count_steps == 0
-                    and summary_writer is not None
                 ):
-                    grad_conflict = _model.compute_gradient_conflict()
-                    for k, v in grad_conflict.items():
-                        if isinstance(v, bool):
-                            summary_writer.add_scalar(
-                                f"gradient_conflict/{k}",
-                                int(v),
+                    grad_conflict = dict(_model.compute_gradient_conflict())
+                    if (
+                        hasattr(_model, "compute_shared_grad_conflict")
+                        # NOTE: the shared-grad measurement runs an EXTRA forward,
+                        # which evokes pipelined embedding modules a second time and
+                        # breaks TrainPipelineSparseDist's input_dist bookkeeping
+                        # ("consumed by others"). Off by default; opt in explicitly
+                        # only on non-pipelined runs via TZREC_SHARED_GRAD_MONITOR=1.
+                        and os.environ.get("TZREC_SHARED_GRAD_MONITOR", "") == "1"
+                    ):
+                        try:
+                            grad_conflict.update(
+                                _model.compute_shared_grad_conflict(batch)
+                            )
+                        except Exception:
+                            logger.exception(
+                                "compute_shared_grad_conflict failed at step %s",
                                 i_step,
                             )
-                        elif isinstance(v, float):
-                            summary_writer.add_scalar(
-                                f"gradient_conflict/{k}", v, i_step
-                            )
+                    if grad_conflict:
+                        float_parts = [
+                            f"{k}={v:.3f}"
+                            for k, v in sorted(grad_conflict.items())
+                            if isinstance(v, float)
+                        ]
+                        conflict_pairs = [
+                            k.replace("grad_conflict_", "")
+                            for k, v in sorted(grad_conflict.items())
+                            if v is True
+                        ]
+                        msg = f"[GRAD_CONFLICT] step={i_step} " + " ".join(float_parts)
+                        if conflict_pairs:
+                            msg += " CONFLICT=" + ",".join(conflict_pairs)
+                        if is_rank_zero:
+                            logger.info(msg)
+                    if summary_writer is not None:
+                        for k, v in grad_conflict.items():
+                            if isinstance(v, bool):
+                                summary_writer.add_scalar(
+                                    f"gradient_conflict/{k}",
+                                    int(v),
+                                    i_step,
+                                )
+                            elif isinstance(v, float):
+                                summary_writer.add_scalar(
+                                    f"gradient_conflict/{k}", v, i_step
+                                )
 
                 # --- Progressive calibration step notification ---
                 if hasattr(_model, "set_current_step"):

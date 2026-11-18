@@ -254,7 +254,7 @@ class TestGradientConflictDetection(unittest.TestCase):
 
         model = MagicMock(spec=PEPNetDCNPLE)
         model._task_gradients = {"ctr": None, "cvr": None}
-        result = model.compute_gradient_conflict()
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
         self.assertEqual(result, {})
 
     def test_single_task_returns_empty_dict(self):
@@ -265,7 +265,7 @@ class TestGradientConflictDetection(unittest.TestCase):
 
         model = MagicMock(spec=PEPNetDCNPLE)
         model._task_gradients = {"ctr": torch.randn(100), "cvr": None}
-        result = model.compute_gradient_conflict()
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
         self.assertEqual(result, {})
 
     def test_two_tasks_compute_norms(self):
@@ -278,7 +278,7 @@ class TestGradientConflictDetection(unittest.TestCase):
         g1 = torch.randn(100)
         g2 = torch.randn(100)
         model._task_gradients = {"ctr": g1, "cvr": g2}
-        result = model.compute_gradient_conflict()
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
         self.assertIn("grad_norm_ctr", result)
         self.assertIn("grad_norm_cvr", result)
         # Norm should match torch norm
@@ -295,7 +295,7 @@ class TestGradientConflictDetection(unittest.TestCase):
         g1 = torch.randn(100)
         g2 = torch.randn(100)
         model._task_gradients = {"ctr": g1, "cvr": g2}
-        result = model.compute_gradient_conflict()
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
         cos_sim = result["grad_cos_sim_ctr_cvr"]
         self.assertGreaterEqual(cos_sim, -1.0)
         self.assertLessEqual(cos_sim, 1.0)
@@ -309,7 +309,7 @@ class TestGradientConflictDetection(unittest.TestCase):
         model = MagicMock(spec=PEPNetDCNPLE)
         g = torch.randn(100)
         model._task_gradients = {"ctr": g, "cvr": g.clone()}
-        result = model.compute_gradient_conflict()
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
         self.assertAlmostEqual(result["grad_cos_sim_ctr_cvr"], 1.0, places=5)
 
     def test_opposite_gradients_cosine_negative_one(self):
@@ -321,7 +321,7 @@ class TestGradientConflictDetection(unittest.TestCase):
         model = MagicMock(spec=PEPNetDCNPLE)
         g = torch.randn(100)
         model._task_gradients = {"ctr": g, "cvr": -g}
-        result = model.compute_gradient_conflict()
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
         self.assertAlmostEqual(result["grad_cos_sim_ctr_cvr"], -1.0, places=5)
 
     def test_conflict_flag_threshold(self):
@@ -335,7 +335,7 @@ class TestGradientConflictDetection(unittest.TestCase):
         g1 = torch.randn(100)
         g2 = -g1 + 0.01 * torch.randn(100)
         model._task_gradients = {"ctr": g1, "cvr": g2}
-        result = model.compute_gradient_conflict()
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
         # Should have conflict flag
         self.assertIn("grad_conflict_ctr_cvr", result)
         self.assertTrue(result["grad_conflict_ctr_cvr"])
@@ -349,7 +349,7 @@ class TestGradientConflictDetection(unittest.TestCase):
         model = MagicMock(spec=PEPNetDCNPLE)
         g = torch.randn(100)
         model._task_gradients = {"ctr": g, "cvr": g.clone()}
-        result = model.compute_gradient_conflict()
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
         self.assertFalse(result["grad_conflict_ctr_cvr"])
 
     def test_three_tasks_pairwise(self):
@@ -364,10 +364,90 @@ class TestGradientConflictDetection(unittest.TestCase):
             "cvr": torch.randn(100),
             "ctcvr": torch.randn(100),
         }
-        result = model.compute_gradient_conflict()
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
         self.assertIn("grad_cos_sim_ctr_cvr", result)
         self.assertIn("grad_cos_sim_ctr_ctcvr", result)
         self.assertIn("grad_cos_sim_cvr_ctcvr", result)
+
+    def test_per_param_dict_format_concatenated(self):
+        """New hook storage format (per-param dict) is concatenated."""
+        from unittest.mock import MagicMock
+
+        from tzrec.models.pepnet_dcn_ple import PEPNetDCNPLE
+
+        model = MagicMock(spec=PEPNetDCNPLE)
+        model._task_gradients = {
+            "ctr": {"weight": torch.ones(10), "bias": torch.ones(1)},
+            "cvr": {"bias": torch.ones(1), "weight": torch.ones(10)},
+        }
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
+        self.assertAlmostEqual(result["grad_norm_ctr"], (11.0) ** 0.5, places=5)
+        self.assertAlmostEqual(result["grad_cos_sim_ctr_cvr"], 1.0, places=5)
+
+    def test_legacy_flat_tensor_format_still_works(self):
+        """Flat-tensor storage (legacy) is still accepted."""
+        from unittest.mock import MagicMock
+
+        from tzrec.models.pepnet_dcn_ple import PEPNetDCNPLE
+
+        model = MagicMock(spec=PEPNetDCNPLE)
+        model._task_gradients = {"ctr": torch.ones(5), "cvr": torch.ones(5)}
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
+        self.assertAlmostEqual(result["grad_cos_sim_ctr_cvr"], 1.0, places=5)
+
+    def test_ema_keys_added_and_smoothed(self):
+        """EMA-prefixed keys are produced and smoothed across calls."""
+        from unittest.mock import MagicMock
+
+        from tzrec.models.pepnet_dcn_ple import PEPNetDCNPLE
+
+        model = MagicMock(spec=PEPNetDCNPLE)
+        model._grad_conflict_ema = {}
+        model._task_gradients = {"ctr": torch.ones(4), "cvr": torch.ones(4)}
+        r1 = PEPNetDCNPLE.compute_gradient_conflict(model)
+        self.assertIn("ema_grad_cos_sim_ctr_cvr", r1)
+        self.assertAlmostEqual(
+            r1["ema_grad_cos_sim_ctr_cvr"], r1["grad_cos_sim_ctr_cvr"], places=5
+        )
+        model._task_gradients = {"ctr": torch.ones(4), "cvr": -torch.ones(4)}
+        r2 = PEPNetDCNPLE.compute_gradient_conflict(model)
+        # EMA = 0.05*(-1) + 0.95*(1) = 0.9
+        self.assertAlmostEqual(r2["ema_grad_cos_sim_ctr_cvr"], 0.9, places=5)
+
+    def test_hook_stores_both_weight_and_bias(self):
+        """Store weight AND bias grads per (task, param) hook.
+
+        Fixes last-write-wins where bias overwrote weight and cosine
+        degenerated to +-1 for num_class=1.
+        """
+        from tzrec.models.pepnet_dcn_ple import (
+            _attach_task_grad_hook,
+            _gather_task_grads,
+        )
+
+        layer = torch.nn.Linear(8, 1)
+        store: dict = {"t1": {}}
+        handles: list = []
+        for pname, param in layer.named_parameters():
+            _attach_task_grad_hook(store, "t1", pname, param, handles)
+        x = torch.randn(4, 8)
+        layer(x).sum().backward()
+        self.assertEqual(set(store["t1"].keys()), {"weight", "bias"})
+        flat = _gather_task_grads(store)["t1"]
+        self.assertEqual(flat.numel(), 8 + 1)
+        for h in handles:
+            h.remove()
+
+    def test_empty_dict_format_returns_empty(self):
+        """Empty per-param dicts count as 'no gradient' and return {}."""
+        from unittest.mock import MagicMock
+
+        from tzrec.models.pepnet_dcn_ple import PEPNetDCNPLE
+
+        model = MagicMock(spec=PEPNetDCNPLE)
+        model._task_gradients = {"ctr": {}, "cvr": {"weight": torch.ones(3)}}
+        result = PEPNetDCNPLE.compute_gradient_conflict(model)
+        self.assertEqual(result, {})
 
 
 class TestGradientHooks(unittest.TestCase):

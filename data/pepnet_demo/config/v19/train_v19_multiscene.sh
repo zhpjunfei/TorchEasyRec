@@ -17,11 +17,15 @@ MODEL_BASE="/Users/zhangjunfei/mmb/TorchEasyRec/data/pepnet_demo/experiments/v19
 LOG_BASE="/Users/zhangjunfei/mmb/TorchEasyRec/data/pepnet_demo/log"
 
 MASTER_PORT=32555
-TRAIN_CONFIG="${CONFIG_DIR}/home_flow_2608_v19_multiscene.config"
+TRAIN_CONFIG="${1:-${CONFIG_DIR}/home_flow_2608_v19_multiscene.config}"
 
 echo "================================================================"
 echo "启动 v19 多场景融合实验    $(date '+%F %T')"
 echo "config: ${TRAIN_CONFIG}"
+# 使用示例:
+#   bash train_v19_multiscene.sh                              # 默认multiscene config
+#   bash train_v19_multiscene.sh home_flow_2608_v19_phase1_p0_v2.config  # 指定config
+
 echo "train: ${TRAIN_PATH}"
 echo "eval: ${VAL_PATH}"
 echo "model_dir: ${MODEL_BASE}"
